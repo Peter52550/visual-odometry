@@ -32,6 +32,7 @@ using namespace cv;
 
 #define UNKNOWN_FLOW_THRESH 1e9  
 
+
 static
 void computeProjectiveMatrixInv(const Mat& ksi, Mat& Rt)
 {
@@ -349,6 +350,91 @@ double calc_residual(
   vector<double>& res_std,
   const Mat &img1,
   const Mat &img2
+);
+// useful typedefs
+typedef Eigen::Matrix<double, 6, 6> Matrix6d;
+typedef Eigen::Matrix<double, 2, 6> Matrix26d;
+typedef Eigen::Matrix<double, 6, 1> Vector6d;
+
+/// class for accumulator jacobians in parallel
+class JacobianAccumulator {
+public:
+    JacobianAccumulator(
+        const cv::Mat &img1_,
+        const cv::Mat &img2_,
+        const VecVector2d &px_ref_,
+        const vector<float> depth_ref_,
+        Sophus::SE3d &T21_) :
+        img1(img1_), img2(img2_), px_ref(px_ref_), depth_ref(depth_ref_), T21(T21_) {
+        projection = VecVector2d(px_ref.size(), Eigen::Vector2d(0, 0));
+    }
+
+    /// accumulate jacobians in a range
+    void accumulate_jacobian(const cv::Range &range);
+
+    /// get hessian matrix
+    Matrix6d hessian() const { return H; }
+
+    /// get bias
+    Vector6d bias() const { return b; }
+
+    /// get total cost
+    double cost_func() const { return cost; }
+
+    /// get projected points
+    VecVector2d projected_points() const { return projection; }
+
+    /// reset h, b, cost to zero
+    void reset() {
+        H = Matrix6d::Zero();
+        b = Vector6d::Zero();
+        cost = 0;
+    }
+
+private:
+    const cv::Mat &img1;
+    const cv::Mat &img2;
+    const VecVector2d &px_ref;
+    const vector<float> depth_ref;
+    Sophus::SE3d &T21;
+    VecVector2d projection; // projected points
+
+    std::mutex hessian_mutex;
+    Matrix6d H = Matrix6d::Zero();
+    Vector6d b = Vector6d::Zero();
+    double cost = 0;
+};
+
+/**
+ * pose estimation using direct method
+ * @param img1
+ * @param img2
+ * @param px_ref
+ * @param depth_ref
+ * @param T21
+ */
+Mat DirectPoseEstimationMultiLayer(
+    const cv::Mat &img1,
+    const cv::Mat &img2,
+    const VecVector2d &px_ref,
+    const vector<float> depth_ref,
+    Sophus::SE3d &T21
+);
+
+/**
+ * pose estimation using direct method
+ * @param img1
+ * @param img2
+ * @param px_ref
+ * @param depth_ref
+ * @param T21
+ */
+Mat DirectPoseEstimationSingleLayer(
+    const cv::Mat &img1,
+    const cv::Mat &img2,
+    const VecVector2d &px_ref,
+    const vector<float> depth_ref,
+    Sophus::SE3d &T21
 );
 int main(int argc, char **argv) {
 	if(argc != 4){
@@ -806,12 +892,49 @@ int main(int argc, char **argv) {
       // time_used = chrono::duration_cast<chrono::duration<double>>(t2 - t1);
       // cout << "solve pnp by g2o cost time: " << time_used.count() << " seconds." << endl;
     //  cout << "calling bundle adjustment by gauss newton" << endl;
+    // let's randomly pick pixels in the first image and generate some 3d points in the first image's frame
+    cv::RNG rng;
+    int nPoints = 2000;
+    int boarder = 20;
+    VecVector3d pixels_ref;
+    VecVector2d pixels_ref_2d;
+    vector<float> depth_ref;
+    // double baseline = 0.573;
+    // generate pixels in ref and load depth data
+    // for (int i = 0; i < nPoints; i++) {
+    //     int x = rng.uniform(boarder, prevgray.cols - boarder);  // don't pick pixels close to boarder
+    //     int y = rng.uniform(boarder, prevgray.rows - boarder);  // don't pick pixels close to boarder
+    //     // int disparity = depth1.at<uchar>(y, x);
+    //     // double depth = fx * baseline / disparity; // you know this is disparity to depth
+    //     // double d = depth1.ptr<double>(y)[x];
+    //     float d1 = depth1.at<float>(y,x)/5000.0;
+    //     float d = depth1.ptr<float>(y)[x]/5000.0;
+    //     if(d1 == 0 || isnan(d1)){
+    //       continue;
+    //     }
+    //     depth_ref.push_back(d1);
+    //     pixels_ref.push_back(Eigen::Vector2d(x, y));
+    // }
+
+    // Sophus::SE3d T_cur_ref;
+    // Mat Rt_baGauss = DirectPoseEstimationSingleLayer(gray, prevgray, pixels_ref, depth_ref, T_cur_ref);
+    // Mat Rt_baGauss = DirectPoseEstimationMultiLayer(prevgray, gray, pixels_ref, depth_ref, T_cur_ref);
+    
+    // generate pixels in ref and load depth data
+    for (int i = 0; i < nPoints; i++) {
+        int x = rng.uniform(boarder, prevgray.cols - boarder);  // don't pick pixels close to boarder
+        int y = rng.uniform(boarder, prevgray.rows - boarder);  // don't pick pixels close to boarder
+        ushort d = depth1.ptr<unsigned short>(y)[x];
+        pixels_ref.push_back(Eigen::Vector3d(x, y,d));
+        pixels_ref_2d.push_back(Eigen::Vector2d(x, y));
+    }
      Sophus::SE3d pose_gn;
      t1 = chrono::steady_clock::now();
      int mode = 0; // 0=huber
-     Mat Rt_baGauss = bundleAdjustmentGaussNewtonPnP(pts_3d_eigen, pts_2d_eigen, K, pose_gn, mode);
+    //  Mat Rt_baGauss = bundleAdjustmentGaussNewtonPnP(pts_3d_eigen, pts_2d_eigen, K, pose_gn, mode);
     //  Mat Rt_baGauss = bundleAdjustmentGaussNewtonICP(pts_3d_eigen, pts_2d_eigen, pts_3d_eigen_nxt, K, pose_gn, mode);
-    //  Mat Rt_baGauss = bundleAdjustmentGaussNewtonDir(pts_3d_eigen, pts_2d_eigen, pts_3d_eigen_nxt, K, pose_gn, mode, image1, image);
+    Mat Rt_baGauss = bundleAdjustmentGaussNewtonDir(pts_3d_eigen, pts_2d_eigen, pts_3d_eigen_nxt, K, pose_gn, mode, prevgray, gray);
+    //  Mat Rt_baGauss = bundleAdjustmentGaussNewtonDir(pixels_ref, pixels_ref_2d, pts_3d_eigen_nxt, K, pose_gn, mode, prevgray, gray);
     //  Mat Rt_baGauss = bundleAdjustmentGaussNewton(pts_3d_eigen, pts_2d_eigen, pts_3d_eigen_nxt, K, pose_gn, mode, image1, image);
       Mat& prevRtbaGauss = *Rts_ba.rbegin();
       cout << "prevRtBA " << prevRtbaGauss << endl;
@@ -834,6 +957,234 @@ int main(int argc, char **argv) {
    writeResults(argv[2], timestamps, Rts_ba);
    
   return 0;
+}
+Mat DirectPoseEstimationMultiLayer(
+    const cv::Mat &img1,
+    const cv::Mat &img2,
+    const VecVector2d &px_ref,
+    const vector<float> depth_ref,
+    Sophus::SE3d &T21) {
+
+    // parameters
+    int pyramids = 4;
+    double pyramid_scale = 0.5;
+    double scales[] = {1.0, 0.5, 0.25, 0.125};
+
+    // create pyramids
+    vector<cv::Mat> pyr1, pyr2; // image pyramids
+    for (int i = 0; i < pyramids; i++) {
+        if (i == 0) {
+            pyr1.push_back(img1);
+            pyr2.push_back(img2);
+        } else {
+            cv::Mat img1_pyr, img2_pyr;
+            cv::resize(pyr1[i - 1], img1_pyr,
+                       cv::Size(pyr1[i - 1].cols * pyramid_scale, pyr1[i - 1].rows * pyramid_scale));
+            cv::resize(pyr2[i - 1], img2_pyr,
+                       cv::Size(pyr2[i - 1].cols * pyramid_scale, pyr2[i - 1].rows * pyramid_scale));
+            pyr1.push_back(img1_pyr);
+            pyr2.push_back(img2_pyr);
+        }
+    }
+  Mat r;
+    float fx = 517.3f, // default
+         fy = 516.5f,
+         cx = 318.6f,
+         cy = 255.3f;
+    float fxG = fx, fyG = fy, cxG = cx, cyG = cy;  // backup the old values
+    for (int level = pyramids - 1; level >= 0; level--) {
+      cout << "here" << endl;
+        VecVector2d px_ref_pyr; // set the keypoints in this pyramid level
+        for (auto &px: px_ref) {
+            px_ref_pyr.push_back(scales[level] * px);
+        }
+
+        // scale fx, fy, cx, cy in different pyramid levels
+        fx = fxG * scales[level];
+        fy = fyG * scales[level];
+        cx = cxG * scales[level];
+        cy = cyG * scales[level];
+        r = DirectPoseEstimationSingleLayer(pyr1[level], pyr2[level], px_ref_pyr, depth_ref, T21);
+    }
+    cout << "hi" << endl;
+    cout << r << endl;
+    // Mat Rt;
+
+    // Rt.at<double>(0,0) = T21.matrix()(0);
+    // Rt.at<double>(1,0) = T21.matrix()(1);
+    // Rt.at<double>(2,0) = T21.matrix()(2);
+    // Rt.at<double>(3,0) = T21.matrix()(3);
+    // Rt.at<double>(0,1) = T21.matrix()(4);
+    // Rt.at<double>(1,1) = T21.matrix()(5);
+    // Rt.at<double>(2,1) = T21.matrix()(6);
+    // Rt.at<double>(3,1) = T21.matrix()(7);
+    // Rt.at<double>(0,2) = T21.matrix()(8);
+    // Rt.at<double>(1,2) = T21.matrix()(9);
+    // Rt.at<double>(2,2) = T21.matrix()(10);
+    // Rt.at<double>(3,2) = T21.matrix()(11);
+    // Rt.at<double>(0,3) = T21.matrix()(12);
+    // Rt.at<double>(1,3) = T21.matrix()(13);
+    // Rt.at<double>(2,3) = T21.matrix()(14);
+    // Rt.at<double>(3,3) = T21.matrix()(15);
+    return r;
+}
+Mat DirectPoseEstimationSingleLayer(
+    const cv::Mat &img1,
+    const cv::Mat &img2,
+    const VecVector2d &px_ref,
+    const vector<float> depth_ref,
+    Sophus::SE3d &T21) {
+
+    const int iterations = 10;
+    double cost = 0, lastCost = 0;
+    auto t1 = chrono::steady_clock::now();
+    JacobianAccumulator jaco_accu(img1, img2, px_ref, depth_ref, T21);
+
+    for (int iter = 0; iter < iterations; iter++) {
+        jaco_accu.reset();
+        cv::parallel_for_(cv::Range(0, px_ref.size()),
+                          std::bind(&JacobianAccumulator::accumulate_jacobian, &jaco_accu, std::placeholders::_1));
+        Matrix6d H = jaco_accu.hessian();
+        Vector6d b = jaco_accu.bias();
+
+        // solve update and put it into estimation
+        Vector6d update = H.ldlt().solve(b);;
+        T21 = Sophus::SE3d::exp(update) * T21;
+        cost = jaco_accu.cost_func();
+
+        if (std::isnan(update[0])) {
+            // sometimes occurred when we have a black or white patch and H is irreversible
+            cout << "update is nan" << endl;
+            break;
+        }
+        if (iter > 0 && cost > lastCost) {
+            cout << "cost increased: " << cost << ", " << lastCost << endl;
+            break;
+        }
+        if (update.norm() < 1e-3) {
+            // converge
+            break;
+        }
+
+        lastCost = cost;
+        cout << "iteration: " << iter << ", cost: " << cost << endl;
+    }
+
+    cout << "T21 = \n" << T21.matrix() << endl;
+    Mat Rt = Mat::eye(4,4,CV_64FC1);
+    Rt.at<double>(0,0) = T21.matrix()(0);
+    Rt.at<double>(1,0) = T21.matrix()(1);
+    Rt.at<double>(2,0) = T21.matrix()(2);
+    Rt.at<double>(3,0) = T21.matrix()(3);
+    Rt.at<double>(0,1) = T21.matrix()(4);
+    Rt.at<double>(1,1) = T21.matrix()(5);
+    Rt.at<double>(2,1) = T21.matrix()(6);
+    Rt.at<double>(3,1) = T21.matrix()(7);
+    Rt.at<double>(0,2) = T21.matrix()(8);
+    Rt.at<double>(1,2) = T21.matrix()(9);
+    Rt.at<double>(2,2) = T21.matrix()(10);
+    Rt.at<double>(3,2) = T21.matrix()(11);
+    Rt.at<double>(0,3) = T21.matrix()(12);
+    Rt.at<double>(1,3) = T21.matrix()(13);
+    Rt.at<double>(2,3) = T21.matrix()(14);
+    Rt.at<double>(3,3) = T21.matrix()(15);
+    // cout << "pose " << Rt << endl;
+    auto t2 = chrono::steady_clock::now();
+    auto time_used = chrono::duration_cast<chrono::duration<double>>(t2 - t1);
+    cout << "direct method for single layer: " << time_used.count() << endl;
+
+    // plot the projected pixels here
+    cv::Mat img2_show;
+    // cv::cvtColor(img2, img2_show, CV_GRAY2BGR);
+    VecVector2d projection = jaco_accu.projected_points();
+    return Rt;
+    // for (size_t i = 0; i < px_ref.size(); ++i) {
+    //     auto p_ref = px_ref[i];
+    //     auto p_cur = projection[i];
+    //     if (p_cur[0] > 0 && p_cur[1] > 0) {
+    //         cv::circle(img2_show, cv::Point2f(p_cur[0], p_cur[1]), 2, cv::Scalar(0, 250, 0), 2);
+    //         cv::line(img2_show, cv::Point2f(p_ref[0], p_ref[1]), cv::Point2f(p_cur[0], p_cur[1]),
+    //                  cv::Scalar(0, 250, 0));
+    //     }
+    // }
+    // cv::imshow("current", img2_show);
+    // cv::waitKey();
+}
+
+void JacobianAccumulator::accumulate_jacobian(const cv::Range &range) {
+float fx = 517.3f, // default
+         fy = 516.5f,
+         cx = 318.6f,
+         cy = 255.3f;
+    // parameters
+    const int half_patch_size = 1;
+    int cnt_good = 0;
+    Matrix6d hessian = Matrix6d::Zero();
+    Vector6d bias = Vector6d::Zero();
+    double cost_tmp = 0;
+    for (size_t i = range.start; i < range.end; i++) {
+
+        // compute the projection in the second image
+        Eigen::Vector3d point_ref =
+            depth_ref[i] * Eigen::Vector3d((px_ref[i][0] - cx) / fx, (px_ref[i][1] - cy) / fy, 1);
+        Eigen::Vector3d point_cur = T21 * point_ref;
+        if (point_cur[2] < 0)   // depth invalid
+            continue;
+
+        float u = fx * point_cur[0] / point_cur[2] + cx, v = fy * point_cur[1] / point_cur[2] + cy;
+        if (u < half_patch_size || u > img2.cols - half_patch_size || v < half_patch_size ||
+            v > img2.rows - half_patch_size)
+            continue;
+
+        projection[i] = Eigen::Vector2d(u, v);
+        double X = point_cur[0], Y = point_cur[1], Z = point_cur[2],
+            Z2 = Z * Z, Z_inv = 1.0 / Z, Z2_inv = Z_inv * Z_inv;
+        cnt_good++;
+
+        // and compute error and jacobian
+        for (int x = -half_patch_size; x <= half_patch_size; x++)
+            for (int y = -half_patch_size; y <= half_patch_size; y++) {
+
+                double error = GetPixelValue(img1, px_ref[i][0] + x, px_ref[i][1] + y) -
+                               GetPixelValue(img2, u + x, v + y);
+                Matrix26d J_pixel_xi;
+                Eigen::Vector2d J_img_pixel;
+
+                J_pixel_xi(0, 0) = fx * Z_inv;
+                J_pixel_xi(0, 1) = 0;
+                J_pixel_xi(0, 2) = -fx * X * Z2_inv;
+                J_pixel_xi(0, 3) = -fx * X * Y * Z2_inv;
+                J_pixel_xi(0, 4) = fx + fx * X * X * Z2_inv;
+                J_pixel_xi(0, 5) = -fx * Y * Z_inv;
+
+                J_pixel_xi(1, 0) = 0;
+                J_pixel_xi(1, 1) = fy * Z_inv;
+                J_pixel_xi(1, 2) = -fy * Y * Z2_inv;
+                J_pixel_xi(1, 3) = -fy - fy * Y * Y * Z2_inv;
+                J_pixel_xi(1, 4) = fy * X * Y * Z2_inv;
+                J_pixel_xi(1, 5) = fy * X * Z_inv;
+
+                J_img_pixel = Eigen::Vector2d(
+                    0.5 * (GetPixelValue(img2, u + 1 + x, v + y) - GetPixelValue(img2, u - 1 + x, v + y)),
+                    0.5 * (GetPixelValue(img2, u + x, v + 1 + y) - GetPixelValue(img2, u + x, v - 1 + y))
+                );
+
+                // total jacobian
+                Vector6d J = -1.0 * (J_img_pixel.transpose() * J_pixel_xi).transpose();
+
+                hessian += J * J.transpose();
+                bias += -error * J;
+                cost_tmp += error * error;
+            }
+    }
+
+    if (cnt_good) {
+        // set hessian, bias and cost
+        unique_lock<mutex> lck(hessian_mutex);
+        H += hessian;
+        b += bias;
+        cost += cost_tmp / cnt_good;
+    }
 }
 void find_feature_matches_another(const Mat &img_1, const Mat &img_2,
                            std::vector<KeyPoint> &keypoints_1,
@@ -1255,10 +1606,10 @@ double calc_residual_dir(
             error += error_direct;
         }
     }
-     residuals.push_back(error/9);
+     residuals.push_back(error);
      if (proj[0] < half_patch_size || proj[0] > img2.cols - half_patch_size || proj[1] < half_patch_size ||
             proj[1] > img2.rows - half_patch_size || isnan(pc[2]) == false) {
-         res_std.push_back(error/9);
+         res_std.push_back(error);
       }
   }
   // for(int i=0; i<residuals.size(); i++){
@@ -1333,8 +1684,9 @@ Mat bundleAdjustmentGaussNewtonDir(
       if (proj[0] < half_patch_size || proj[0] > img2.cols - half_patch_size || proj[1] < half_patch_size || proj[1] > img2.rows - half_patch_size || isnan(pc[2])){
         continue;
       }
+      // "[" << points_3d[i][0] << ", " << points_3d[i][1] << "]" <<"[" << pc[0] << ", " << pc[1] << "]" <<  
       cnt_good = cnt_good + 1;
-      cout << "[" << points_3d[i][0] << ", " << points_3d[i][1] << "]" <<"[" << pc[0] << ", " << pc[1] << "]" <<  "[" << points_2d[i][0] << ", " << points_2d[i][1] << "]" << " [" << proj[0] << ", " << proj[1] << "]" << endl;
+      cout << "[" << points_2d[i][0] << ", " << points_2d[i][1] << "]" << " [" << proj[0] << ", " << proj[1] << "]" << endl;
       double total_error_dir = 0;
       double X = pc[0], Y = pc[1], Z = pc[2], Z2 = Z * Z, Z_inv = 1.0 / Z, Z2_inv = Z_inv * Z_inv;
       for (int x = -half_patch_size; x <= half_patch_size; x++){
@@ -1377,8 +1729,8 @@ Mat bundleAdjustmentGaussNewtonDir(
     if(cnt_good){
         H += H_dir;
         b += b_dir;
-        cost += cost_dir_tmp / cnt_good;
-        // cost = cost_dir_tmp;
+        // cost += cost_dir_tmp / cnt_good;
+        cost = cost_dir_tmp;
     }
   cout << "HHHHHHHHHH   " << H << endl;
   cout << "bbbbbbbbbbbbb     " << b << endl;
