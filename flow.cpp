@@ -548,7 +548,7 @@ int main(int argc, char **argv) {
          fy = 516.5f,
          cx = 318.6f,
          cy = 255.3f;
-   string datas[2300];
+   string datas[6000];
    string str1;
    std::getline(file, str1);
     datas[0] = str1;
@@ -692,7 +692,6 @@ int main(int argc, char **argv) {
         // chrono::steady_clock::time_point t2 = chrono::steady_clock::now();
         // chrono::duration<double> time_used = chrono::duration_cast<chrono::duration<double>>(t2 - t1);
         // cout << "solve optical flow cost time: " << time_used.count() << " seconds." << endl;
-      
         std::vector<KeyPoint> keypoints_1, keypoints_2, key1, key2;
         vector<DMatch> matches;
         Ptr<FeatureDetector> detector = BRISK::create();
@@ -709,6 +708,14 @@ int main(int argc, char **argv) {
                 keypoints_2.clear();
                 find_features2(prevgray, gray, keypoints_1, keypoints_2, matches, image2);
                 cout << "第三個: " <<  "一共找到了" << keypoints_1.size() << " " << keypoints_2.size() << " 组匹配点" << endl;
+                // Mat Rt_baGauss = Mat::eye(4,4,CV_64FC1);
+                // Mat& prevRtbaGauss = *Rts_ba.rbegin();
+                // cout << "prevRtBA " << prevRtbaGauss << endl;
+                // cout << "RtBA " << Rt_baGauss << endl; 
+                // Rts_ba.push_back(prevRtbaGauss * Rt_baGauss);
+                // cout << "no matching" << endl;
+                // timestamps.push_back( timestap );
+                // continue;
             }
         }
         else{
@@ -766,7 +773,7 @@ int main(int argc, char **argv) {
         vector<vector<DMatch>> nearest_neighbors;
         // cout << "flat " << right_points_to_find_flat << endl;
         // cout << "flat " << right_features_flat << endl;
-        if(right_points_to_find.size() > 50){
+        if(right_points_to_find.size() > 10){
               float dis = 2.0f;
               int tot = 0;
               int ii = 0;
@@ -797,17 +804,17 @@ int main(int argc, char **argv) {
                   
                 double r = 0.5 + ind * 0.05;
                 cout << "first " << matches.size() << " " << ind << " ratio " << r << endl;
-                for(int i=0; i<nearest_neighbors.size(); i++) {
+                for(int w=0; w<nearest_neighbors.size(); w++) {
                     DMatch _m;
                     // cout << "nearest_neighbors[i] " << nearest_neighbors[i].size() << endl;
-                    if(nearest_neighbors[i].size() == 1) {
-                    _m = nearest_neighbors[i][0]; // only one neighbor
-                    } else if(nearest_neighbors[i].size() > 1) {
+                    if(nearest_neighbors[w].size() == 1) {
+                    _m = nearest_neighbors[w][0]; // only one neighbor
+                    } else if(nearest_neighbors[w].size() > 1) {
                         // 2 neighbors – check how close they are
-                        double ratio = nearest_neighbors[i][0].distance / nearest_neighbors[i][1].distance;
+                        double ratio = nearest_neighbors[w][0].distance / nearest_neighbors[w][1].distance;
                         if(ratio < r) { // not too close //0.38
                         // take the closest (first) one
-                            _m = nearest_neighbors[i][0];
+                            _m = nearest_neighbors[w][0];
                         }else { // too close – we cannot tell which is better
                             continue; // did not pass ratio test – throw away
                         }
@@ -836,13 +843,31 @@ int main(int argc, char **argv) {
               }
         
         }else {
-          cout << "use matching" << endl;
-          keypoints_1.clear();
-          keypoints_2.clear();
-          matches.clear();
-          find_features(prevgray, gray, keypoints_1, keypoints_2, matches, image);
+          // cout << "use matching" << endl;
+          // keypoints_1.clear();
+          // keypoints_2.clear();
+          // matches.clear();
+          // Mat Rt_baGauss = Mat::eye(4,4,CV_64FC1);
+          // Mat& prevRtbaGauss = *Rts_ba.rbegin();
+          // cout << "prevRtBA " << prevRtbaGauss << endl;
+          // cout << "RtBA " << Rt_baGauss << endl; 
+          // Rts_ba.push_back(prevRtbaGauss * Rt_baGauss);
+          // cout << "no matching 2" << endl;
+          // timestamps.push_back( timestap );
+          // continue;
+          find_features2(prevgray, gray, keypoints_1, keypoints_2, matches, image);
+
         }
-       
+       if(matches.size() == 0){
+         Mat Rt_baGauss = Mat::eye(4,4,CV_64FC1);
+          Mat& prevRtbaGauss = *Rts_ba.rbegin();
+          cout << "prevRtBA " << prevRtbaGauss << endl;
+          cout << "RtBA " << Rt_baGauss << endl; 
+          Rts_ba.push_back(prevRtbaGauss * Rt_baGauss);
+          cout << "no matching 3" << endl;
+          timestamps.push_back( timestap );
+          continue;
+       }
         cout<< "pruned " << matches.size() << " / " << nearest_neighbors.size() << " matches" << endl;
         
         // 建立3D点
@@ -881,6 +906,16 @@ int main(int argc, char **argv) {
         }
         cout << "3d-2d pairs: " << pts_3d.size() << " " << pts_2d.size() << endl;
         // exit(1);
+        if(pts_3d.size() == 0){
+         Mat Rt_baGauss = Mat::eye(4,4,CV_64FC1);
+          Mat& prevRtbaGauss = *Rts_ba.rbegin();
+          cout << "prevRtBA " << prevRtbaGauss << endl;
+          cout << "RtBA " << Rt_baGauss << endl; 
+          Rts_ba.push_back(prevRtbaGauss * Rt_baGauss);
+          cout << "no matching 4" << endl;
+          timestamps.push_back( timestap );
+          continue;
+       }
         VecVector3d pts_3d_eigen;
       VecVector2d pts_2d_eigen;
       VecVector3d pts_3d_eigen_nxt;
@@ -1076,11 +1111,11 @@ int main(int argc, char **argv) {
      Sophus::SE3d pose_gn;
     //  t1 = chrono::steady_clock::now();
      int mode = 0; // 0=huber
-    //  Mat Rt_baGauss = bundleAdjustmentGaussNewtonPnP(pts_3d_eigen, pts_2d_eigen, K, pose_gn, mode);
+     Mat Rt_baGauss = bundleAdjustmentGaussNewtonPnP(pts_3d_eigen, pts_2d_eigen, K, pose_gn, mode);
     //  Mat Rt_baGauss = bundleAdjustmentGaussNewtonICP(pts_3d_eigen, pts_2d_eigen, pts_3d_eigen_nxt, K, pose_gn, mode);
     // Mat Rt_baGauss = bundleAdjustmentGaussNewtonDir(pts_3d_eigen, pts_2d_eigen, pts_3d_eigen_nxt, K, pose_gn, mode, prevgray, gray);
     //  Mat Rt_baGauss = bundleAdjustmentGaussNewtonDir(pixels_ref, pixels_ref_2d, pts_3d_eigen_nxt, K, pose_gn, mode, prevgray, gray);
-     Mat Rt_baGauss = bundleAdjustmentGaussNewton(pts_3d_eigen, pts_2d_eigen, pts_3d_eigen_nxt, K, pose_gn, mode, image1, image);
+    //  Mat Rt_baGauss = bundleAdjustmentGaussNewton(pts_3d_eigen, pts_2d_eigen, pts_3d_eigen_nxt, K, pose_gn, mode, image1, image);
       Mat& prevRtbaGauss = *Rts_ba.rbegin();
       cout << "prevRtBA " << prevRtbaGauss << endl;
       cout << "RtBA " << Rt_baGauss << endl; 

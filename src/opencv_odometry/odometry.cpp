@@ -92,6 +92,94 @@ int normalMethod = RgbdNormals::RGBD_NORMALS_METHOD_LIYANG;
 typedef vector<Eigen::Vector2d, Eigen::aligned_allocator<Eigen::Vector2d>> VecVector2d;
 typedef vector<Eigen::Vector3d, Eigen::aligned_allocator<Eigen::Vector3d>> VecVector3d;
 
+
+void find_features(const Mat &img_1, const Mat &img_2,
+                           std::vector<KeyPoint> &keypoints_1,
+			                  std::vector<KeyPoint> &keypoints_2,
+                           std::vector<DMatch> &matches,
+                           const Mat &img_3) {
+
+   Mat descriptors_1, descriptors_2, descriptors_3, descriptors_4;
+   Ptr<FeatureDetector> detector = BRISK::create();
+   Ptr<DescriptorExtractor> descriptor = BRISK::create();
+   Ptr<FeatureDetector> detector2 = KAZE::create();
+   Ptr<DescriptorExtractor> descriptor2 = KAZE::create();
+   // Ptr<DescriptorMatcher> matcher = DescriptorMatcher::create("BruteForce-Hamming");
+   Ptr<DescriptorMatcher> matcher = DescriptorMatcher::create("FlannBased");
+   // cv::FlannBasedMatcher matcher = cv::FlannBasedMatcher(cv::makePtr<cv::flann::LshIndexParams>(12, 20, 2));
+   detector->detect(img_1, keypoints_1);
+   detector->detect(img_2, keypoints_2);
+   cout << "keypoints_1.size() "<< keypoints_1.size() << " keypoints_2.size() " << keypoints_2.size() << endl;
+   if(keypoints_1.size() == 0 || keypoints_2.size() == 0){
+     keypoints_1.clear();
+     keypoints_2.clear();
+     detector = KAZE::create();
+     descriptor = KAZE::create();
+     detector->detect(img_1, keypoints_1);
+    detector->detect(img_2, keypoints_2);
+   }
+   // if(keypoints_1.size() != 0 && keypoints_2.size() != 0){
+      
+      descriptor->compute(img_1, keypoints_1, descriptors_1);
+      descriptor->compute(img_2, keypoints_2, descriptors_2);
+   // }
+   // cout << "des1 " << descriptors_1  << "des2 " << descriptors_2 << endl;
+   int eee = descriptors_1.empty();
+   int ddd = descriptors_2.empty();
+   vector<DMatch> match;
+   vector<vector<DMatch>> knn_matches; 
+   descriptors_1.convertTo(descriptors_1, CV_32F);
+   descriptors_2.convertTo(descriptors_2, CV_32F);
+   matcher->knnMatch( descriptors_1, descriptors_2, knn_matches, 2);
+    const float ratio_thresh = 0.7f;
+   //  std::vector<DMatch> good_matches;
+    for (size_t i = 0; i < knn_matches.size(); i++)
+    {
+        if (knn_matches[i][0].distance < ratio_thresh * knn_matches[i][1].distance)
+        {
+            matches.push_back(knn_matches[i][0]);
+        }
+    }
+ }
+ void find_features2(const Mat &img_1, const Mat &img_2,
+                           std::vector<KeyPoint> &keypoints_1,
+			                  std::vector<KeyPoint> &keypoints_2,
+                           std::vector<DMatch> &matches,
+                           const Mat &img_3) {
+
+   Mat descriptors_1, descriptors_2, descriptors_3, descriptors_4;
+   Ptr<FeatureDetector> detector = KAZE::create();
+   Ptr<DescriptorExtractor> descriptor = KAZE::create();
+   // Ptr<DescriptorMatcher> matcher = DescriptorMatcher::create("BruteForce-Hamming");
+   Ptr<DescriptorMatcher> matcher = DescriptorMatcher::create("FlannBased");
+   // cv::FlannBasedMatcher matcher = cv::FlannBasedMatcher(cv::makePtr<cv::flann::LshIndexParams>(12, 20, 2));
+   detector->detect(img_1, keypoints_1);
+   detector->detect(img_2, keypoints_2);
+   cout << "keypoints_1.size() "<< keypoints_1.size() << " keypoints_2.size() " << keypoints_2.size() << endl;
+   // if(keypoints_1.size() != 0 && keypoints_2.size() != 0){
+      
+      descriptor->compute(img_1, keypoints_1, descriptors_1);
+      descriptor->compute(img_2, keypoints_2, descriptors_2);
+   // }
+   // cout << "des1 " << descriptors_1  << "des2 " << descriptors_2 << endl;
+   int eee = descriptors_1.empty();
+   int ddd = descriptors_2.empty();
+   vector<DMatch> match;
+   vector<vector<DMatch>> knn_matches; 
+   descriptors_1.convertTo(descriptors_1, CV_32F);
+   descriptors_2.convertTo(descriptors_2, CV_32F);
+   matcher->knnMatch( descriptors_1, descriptors_2, knn_matches, 2);
+    const float ratio_thresh = 0.7f;
+   //  std::vector<DMatch> good_matches;
+    for (size_t i = 0; i < knn_matches.size(); i++)
+    {
+        if (knn_matches[i][0].distance < ratio_thresh * knn_matches[i][1].distance)
+        {
+            matches.push_back(knn_matches[i][0]);
+        }
+    }
+ }
+
 double Average(vector<double> v)
 {      double sum=0;
        for(int i=0;i<v.size();i++)
@@ -253,21 +341,39 @@ void calculatePnPInliers(const Mat& frame0,
     detector->detect(frame1, key2);
 
     if(key1.size() == 0 || key2.size() == 0){
-        // find_feature_matches_another(image1, image, keypoints_1, keypoints_2, matches);
-        find_feature_matches_another(frame0, frame1, keypoints_1, keypoints_2, matches);
-        cout << "第二個: " <<  "一共找到了" << matches.size() << "组匹配点" << endl;
-    }
-    else{
-        // find_feature_matches(image1, image, keypoints_1, keypoints_2, matches);
-        find_feature_matches(frame0, frame1, keypoints_1, keypoints_2, matches);
-        cout << "第一個: " <<"一共找到了" << matches.size() << "组匹配点" << endl;
-    }
+            // find_feature_matches_another(image1, image, keypoints_1, keypoints_2, matches, image2);
+            find_feature_matches_another(frame0, frame1, keypoints_1, keypoints_2, matches);
+            cout << "第二個: " <<  "一共找到了" << keypoints_1.size() << "组匹配点" << endl;
+            if(keypoints_1.size() == 0 || keypoints_2.size() == 0){
+                keypoints_1.clear();
+                keypoints_2.clear();
+                find_features2(frame0, frame1, keypoints_1, keypoints_2, matches, frame0);
+                cout << "第三個: " <<  "一共找到了" << keypoints_1.size() << " " << keypoints_2.size() << " 组匹配点" << endl;
+                // Mat Rt_baGauss = Mat::eye(4,4,CV_64FC1);
+                // Mat& prevRtbaGauss = *Rts_ba.rbegin();
+                // cout << "prevRtBA " << prevRtbaGauss << endl;
+                // cout << "RtBA " << Rt_baGauss << endl; 
+                // Rts_ba.push_back(prevRtbaGauss * Rt_baGauss);
+                // cout << "no matching" << endl;
+                // timestamps.push_back( timestap );
+                // continue;
+            }
+        }
+        else{
+            // find_feature_matches(image1, image, keypoints_1, keypoints_2, matches, image2);
+            find_feature_matches(frame0, frame1, keypoints_1, keypoints_2, matches);
+            cout << "第一個: " <<"一共找到了" << keypoints_1.size() << "组匹配点" << endl;
+        }
     // exit(1);
+    cout << "hi" << endl;
+    // keypoints_1.convertTo(keypoints_1, CV_32F);
     vector<Point2f> pt1, pt2;
     for (auto &kp: keypoints_1) pt1.push_back(kp.pt);
     vector<uchar> status;
     vector<float> error;
+    cout << "hey" << endl;
     cv::calcOpticalFlowPyrLK(frame0, frame1, pt1, pt2, status, error);
+    cout << "ho" << endl;
     // cv::calcOpticalFlowPyrLK(image1, image, pt1, pt2, status, error);
     vector<Point2f> right_points_to_find;
     vector<int> right_points_to_find_back_index;
@@ -289,29 +395,93 @@ void calculatePnPInliers(const Mat& frame0,
     Mat right_features_flat = Mat(right_features).reshape(1,right_features.size());
     BFMatcher matcher(NORM_L2);
     vector<vector<DMatch>> nearest_neighbors;
-    matcher.radiusMatch(right_points_to_find_flat, right_features_flat, nearest_neighbors, 2.0f);
-    std::set<int> found_in_right_points; // for duplicate prevention
-    for(int i=0; i<nearest_neighbors.size(); i++) {
-        DMatch _m;
-        if(nearest_neighbors[i].size() == 1) {
-        _m = nearest_neighbors[i][0]; // only one neighbor
-        } else if(nearest_neighbors[i].size() > 1) {
-            double ratio = nearest_neighbors[i][0].distance / nearest_neighbors[i][1].distance;
-            if(ratio < 0.5) { // not too close //0.38
-                _m = nearest_neighbors[i][0];
-            }else { // too close – we cannot tell which is better
-                continue; // did not pass ratio test – throw away
-            }
-        } else {
-            continue; // no neighbors
+    if(right_points_to_find.size() > 10){
+              float dis = 2.0f;
+              int tot = 0;
+              int ii = 0;
+              while ((tot < 10 && right_points_to_find.size() > 10) || (tot == 0 && right_points_to_find.size() <= 10 ) ){
+                if(ii > 1){
+                  for(int h=0; h<nearest_neighbors.size(); h++){
+                    nearest_neighbors[h].clear();
+                  }
+                }
+                  matcher.radiusMatch(right_points_to_find_flat, right_features_flat, nearest_neighbors, dis);
+                  tot = 0;
+                  for(int h=0; h<nearest_neighbors.size(); h++){
+                    tot += nearest_neighbors[h].size();
+                  }
+                  dis = dis + 0.5f;
+                  ii += 1;
+              }
+              tot = 0;
+              for(int h=0; h<nearest_neighbors.size(); h++){
+                    tot += nearest_neighbors[h].size();
+              }
+              cout << "total " << tot << endl;
+              // Check that the found neighbors are unique (throw away neighbors
+              // that are too close together, as they may be confusing)
+              std::set<int> found_in_right_points; // for duplicate prevention
+              int ind = 0;
+              while(matches.size() == 0){
+                  
+                double r = 0.5 + ind * 0.05;
+                cout << "first " << matches.size() << " " << ind << " ratio " << r << endl;
+                for(int w=0; w<nearest_neighbors.size(); w++) {
+                    DMatch _m;
+                    // cout << "nearest_neighbors[i] " << nearest_neighbors[i].size() << endl;
+                    if(nearest_neighbors[w].size() == 1) {
+                    _m = nearest_neighbors[w][0]; // only one neighbor
+                    } else if(nearest_neighbors[w].size() > 1) {
+                        // 2 neighbors – check how close they are
+                        double ratio = nearest_neighbors[w][0].distance / nearest_neighbors[w][1].distance;
+                        if(ratio < r) { // not too close //0.38
+                        // take the closest (first) one
+                            _m = nearest_neighbors[w][0];
+                        }else { // too close – we cannot tell which is better
+                            continue; // did not pass ratio test – throw away
+                        }
+                    } else {
+                        continue; // no neighbors
+                    }
+                    // prevent duplicates
+                    if (found_in_right_points.find(_m.trainIdx) == found_in_right_points.end()) {
+                        // The found neighbor was not yet used:
+                        // We should match it with the original indexing
+                        // ofthe left point
+                        _m.queryIdx = right_points_to_find_back_index[_m.queryIdx];
+                        matches.push_back(_m); // add this match
+                        found_in_right_points.insert(_m.trainIdx);
+                    }
+                  
+                }
+                cout << found_in_right_points.size() << endl;
+                cout << "end " << matches.size() << " " << ind << " ratio " << r << endl;
+                if(ind < 20 && matches.size() == 0){
+                      matches.clear();
+                      ind += 1;
+                  }else{
+                    break;
+                  }
+              }
+        
+        }else {
+          // cout << "use matching" << endl;
+          // keypoints_1.clear();
+          // keypoints_2.clear();
+          // matches.clear();
+          // Mat Rt_baGauss = Mat::eye(4,4,CV_64FC1);r
+          // Mat& prevRtbaGauss = *Rts_ba.rbegin();
+          // cout << "prevRtBA " << prevRtbaGauss << endl;
+          // cout << "RtBA " << Rt_baGauss << endl; 
+          // Rts_ba.push_back(prevRtbaGauss * Rt_baGauss);
+          // cout << "no matching 2" << endl;
+          // timestamps.push_back( timestap );
+          // continue;
+          find_features2(frame0, frame1, keypoints_1, keypoints_2, matches, image);
+
         }
-        if (found_in_right_points.find(_m.trainIdx) == found_in_right_points.end()) {
-            _m.queryIdx = right_points_to_find_back_index[_m.queryIdx];
-            matches.push_back(_m); // add this match
-            found_in_right_points.insert(_m.trainIdx);
-        }
-    }
-    cout<< "pruned " << matches.size() << " / " << nearest_neighbors.size() << " matches" << endl;
+    if(matches.size() != 0){
+        cout<< "pruned " << matches.size() << " / " << nearest_neighbors.size() << " matches" << endl;
     // Mat d1 = imread(depth1, IMREAD_UNCHANGED);       // 深度图为16位无符号数，单通道图像
     // Mat K = (Mat_<double>(3, 3) << 517.3f, 0, 318.6f, 0, 516.5f, 255.3f, 0, 0, 1);
     vector<Point3f> pts_3d;
@@ -345,7 +515,8 @@ void calculatePnPInliers(const Mat& frame0,
     }
     cout << "3d-2d pairs: " << pts_3d.size() << " " << pts_2d.size() << endl;
     // exit(1);
-    for (size_t i = 0; i < pts_3d.size(); ++i) {
+    if(pts_3d.size() != 0){
+                for (size_t i = 0; i < pts_3d.size(); ++i) {
         pts_3d_eigen.push_back(Eigen::Vector3d(pts_3d[i].x, pts_3d[i].y, pts_3d[i].z));
         pts_2d_eigen.push_back(Eigen::Vector2d(pts_2d[i].x, pts_2d[i].y));
     }
@@ -356,11 +527,11 @@ void calculatePnPInliers(const Mat& frame0,
     keypoints_2 = keys2;
     Mat r, t, inliers;
     cout << "3d-2d pairs: " << pts_3d.size() << " " << pts_2d.size() << endl;
-    solvePnPRansac(pts_3d, pts_2d, K, Mat(), r, t, b, 1000, 6.0, 0.99, inliers, SOLVEPNP_ITERATIVE);
-    Mat R;
-    cv::Rodrigues(r, R);
+    // solvePnPRansac(pts_3d, pts_2d, K, Mat(), r, t, b, 1000, 6.0, 0.99, inliers, SOLVEPNP_ITERATIVE);
+    // Mat R;
+    // cv::Rodrigues(r, R);
     Mat output;
-    Mat Rt_ba;
+    // Mat Rt_ba;
     // VecVector3d pts_3d_eigen;
     // VecVector2d pts_2d_eigen;
     cout << "3d-2d pairs: " << pts_3d.size() << " " << pts_2d.size() << endl;
@@ -392,6 +563,10 @@ void calculatePnPInliers(const Mat& frame0,
             // cout << "weight " << 0.0 << endl;
         }
     }
+       }
+    
+    }
+    
     
 }
 
@@ -1351,6 +1526,7 @@ bool RGBDICPOdometryImpl(Mat& Rt, const Mat& initRt,
             // cv2eigen(resultRt, Rt);
             // cv2eigen(resultRtPnP, Rt);
             // cout << "Rt " << Rt << endl;
+            if(pts_3d_eigen.size() > 0){
             for (int i = 0; i < pts_3d_eigen.size(); i++) {
                 // cout << "pnp " << Rt << endl;
                 // cout << (Rt * (pts_3d_eigen[i].homogeneous())).transpose().hnormalized().rows() << " " << (Rt * (pts_3d_eigen[i].homogeneous())).transpose().hnormalized().cols() << endl;
@@ -1405,15 +1581,17 @@ bool RGBDICPOdometryImpl(Mat& Rt, const Mat& initRt,
             // // run only pnp method
             AtA += AtA_pnp;
             AtB += AtB_pnp;
-            cout << "HHHHHHHHHH     " << AtA << endl;
-            cout << "bbbbbbbbbb     " << AtB << endl;
+        }
+            // cout << "HHHHHHHHHH     " << AtA << endl;
+            // cout << "bbbbbbbbbb     " << AtB << endl;
 
             Eigen::Matrix<double, 6, 6> eigenH;
             Eigen::Matrix<double, 6, 1> eigenb;
             cv::cv2eigen(AtA, eigenH);
             cv::cv2eigen(AtB, eigenb);
-            cout << "eigen " << eigenH << endl;
-            cout << "eigen " << eigenb << endl;
+            // cout << "eigen " << eigenH << endl;
+            // cout << "eigen " << eigenb << endl;
+
             Vector6d dx;
             dx = eigenH.ldlt().solve(eigenb);
             if (dx.norm() < 1e-8) {

@@ -130,14 +130,14 @@ int main(int argc, char** argv)
     const int rgbPathLehgth = 17+8;
     const int depthPathLehgth = 17+10;
 
-    // float fx = 525.0f, // default
-    //       fy = 525.0f,
-    //       cx = 319.5f,
-    //       cy = 239.5f;
-    float fx = 517.3f, // default
-         fy = 516.5f,
-         cx = 318.6f,
-         cy = 255.3f;
+    float fx = 525.0f, // default
+          fy = 525.0f,
+          cx = 319.5f,
+          cy = 239.5f;
+    // float fx = 517.3f, // default
+    //      fy = 516.5f,
+    //      cx = 318.6f,
+    //      cy = 255.3f;
     if(filename.find("freiburg1") != string::npos)
         setCameraMatrixFreiburg1(fx, fy, cx, cy);
     if(filename.find("freiburg2") != string::npos)
