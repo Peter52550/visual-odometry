@@ -1131,9 +1131,9 @@ int main(int argc, char **argv) {
      int mode = 0; // 0=huber
     //  Mat Rt_baGauss = bundleAdjustmentGaussNewtonPnP(pts_3d_eigen, pts_2d_eigen, K, pose_gn, mode);
     //  Mat Rt_baGauss = bundleAdjustmentGaussNewtonICP(pts_3d_eigen, pts_2d_eigen, pts_3d_eigen_nxt, K, pose_gn, mode);
-    Mat Rt_baGauss = bundleAdjustmentGaussNewtonDir(pts_3d_eigen, pts_2d_eigen, pts_3d_eigen_nxt, K, pose_gn, mode, prevgray, gray);
+    // Mat Rt_baGauss = bundleAdjustmentGaussNewtonDir(pts_3d_eigen, pts_2d_eigen, pts_3d_eigen_nxt, K, pose_gn, mode, prevgray, gray);
     //  Mat Rt_baGauss = bundleAdjustmentGaussNewtonDir(pixels_ref, pixels_ref_2d, pts_3d_eigen_nxt, K, pose_gn, mode, prevgray, gray);
-    //  Mat Rt_baGauss = bundleAdjustmentGaussNewton(pts_3d_eigen, pts_2d_eigen, pts_3d_eigen_nxt, K, pose_gn, mode, image1, image);
+     Mat Rt_baGauss = bundleAdjustmentGaussNewton(pts_3d_eigen, pts_2d_eigen, pts_3d_eigen_nxt, K, pose_gn, mode, image1, image);
       Mat& prevRtbaGauss = *Rts_ba.rbegin();
       cout << "prevRtBA " << prevRtbaGauss << endl;
       cout << "RtBA " << Rt_baGauss << endl; 
@@ -1653,7 +1653,8 @@ Mat bundleAdjustmentGaussNewton(
             weight_dir.push_back(0.0);
         }
     }
-
+  vector<double> cost_pnp_prev;
+  vector<double> cost_icp_prev;
   for (int iter = 0; iter < iterations; iter++) {
     Eigen::Matrix<double, 6, 6> H = Eigen::Matrix<double, 6, 6>::Zero();
     Vector6d b = Vector6d::Zero();
@@ -1671,16 +1672,20 @@ Mat bundleAdjustmentGaussNewton(
     double cost_dir_tmp = 0;
     const int half_patch_size = 1;
     int cnt_good = 0;
+
+    
+    double scale = 1;
+    double regular = 0;
     // compute cost
     for (int i = 0; i < points_3d.size(); i++) {
       Eigen::Vector2d orig(fx * points_3d[i][0] / points_3d[i][2] + cx, fy * points_3d[i][1] / points_3d[i][2] + cy);
       Eigen::Vector3d pc = pose * points_3d[i];
       Eigen::Vector2d proj(fx * pc[0] / pc[2] + cx, fy * pc[1] / pc[2] + cy);
-
+      
       if (proj[0] < half_patch_size || proj[0] > img2.cols - half_patch_size || proj[1] < half_patch_size || proj[1] > img2.rows - half_patch_size || isnan(pc[2])){
         continue;
       }
-
+      
       // PnP
       double inv_z = 1.0 / pc[2];
       double inv_z2 = inv_z * inv_z;
@@ -1699,6 +1704,7 @@ Mat bundleAdjustmentGaussNewton(
           fy + fy * pc[1] * pc[1] * inv_z2,
           -fy * pc[0] * pc[1] * inv_z2,
           -fy * pc[0] * inv_z;
+      
 
       // ICP
       Eigen::Vector3d error_icp = pc - points_3d_nxt[i];
@@ -1707,8 +1713,33 @@ Mat bundleAdjustmentGaussNewton(
               0, 1, 0, -pc[2], 0, pc[0],
               0, 0, 1, pc[1], -pc[0], 0;
       cost_icp += error_icp.squaredNorm();
-      // cout << "[" << points_2d[i][0] << ", " << points_2d[i][1] << "]" << " [" << proj[0] << ", " << proj[1] << "]" << endl;
 
+      if(iter > 0){
+        double avg_pnp = Average(cost_pnp_prev); 
+        double std_pnp = Deviation(cost_pnp_prev,avg_pnp);
+        double avg_icp = Average(cost_icp_prev); 
+        double std_icp = Deviation(cost_icp_prev,avg_icp);
+        double err_p = (error_pnp.squaredNorm() - avg_pnp)/std_pnp;
+        double err_i = (error_icp.squaredNorm() - avg_icp)/std_icp;
+        double err = err_p - err_i;
+        regular = err*res_std[2] + Average(residuals_dir);
+        // cout << err << " " << Average(residuals_dir) << " " << err*res_std[2] << " " << err*res_std[2] + Average(residuals_dir) << endl;
+
+        // regular = sqrt(pow((fx*error_icp[0]/error_icp[2]+cx - error_pnp[0]),2.0) + pow((fy*error_icp[1]/error_icp[2]+cy - error_pnp[1]),2.0));
+        // cout << error_icp.squaredNorm() << "," << error_pnp.squaredNorm() << "," << avg_pnp << " " << avg_icp << res_std[1] << endl;
+        // cout << (error_pnp.squaredNorm() - avg_pnp)/std_pnp << " " << (error_icp.squaredNorm() - avg_icp)/std_icp << endl;
+        // cout << "regular " << regular << endl;
+        scale = (exp(cost_pnp_prev[i])*exp(cost_icp_prev[i]))/(exp(error_pnp.squaredNorm())*exp(error_icp.squaredNorm()));
+      }
+      
+      if(iter == 0){
+        cost_pnp_prev.push_back(error_pnp.squaredNorm());
+        cost_icp_prev.push_back(error_icp.squaredNorm());
+      }else{
+        cost_pnp_prev.at(i) = error_pnp.squaredNorm();
+        cost_icp_prev.at(i) = error_icp.squaredNorm();
+      }
+      // cout << "[" << points_2d[i][0] << ", " << points_2d[i][1] << "]" << " [" << proj[0] << ", " << proj[1] << "]" << endl;
       // direct
       cnt_good = cnt_good + 1;
       
@@ -1716,8 +1747,12 @@ Mat bundleAdjustmentGaussNewton(
       for (int x = -half_patch_size; x <= half_patch_size; x++){
           for (int y = -half_patch_size; y <= half_patch_size; y++) {
 
-              double error_dir = GetPixelValue(img1, orig[0] + x, orig[1] + y) -
-                          GetPixelValue(img2, proj[0] + x, proj[1] + y);
+              // double error_dir = GetPixelValue(img1, orig[0] + x, orig[1] + y) -
+              //             GetPixelValue(img2, proj[0] + x, proj[1] + y);
+              
+              double error_dir = GetPixelValue(img2, proj[0] + x, proj[1] + y) - (GetPixelValue(img1, orig[0] + x, orig[1] + y)-regular*0.1)*scale;
+              // cout << GetPixelValue(img2, proj[0] + x, proj[1] + y) << " " << GetPixelValue(img1, orig[0] + x, orig[1] + y) << " " << error_dir << " " << regular << " " << scale << endl;
+              // cout << regular*0.1 << " " << GetPixelValue(img1, orig[0] + x, orig[1] + y) << endl;
               Eigen::Matrix<double, 2, 6> J_pixel_xi;
               Eigen::Vector2d J_img_pixel;
               J_pixel_xi(0, 0) = fx * Z_inv;
@@ -1755,11 +1790,15 @@ Mat bundleAdjustmentGaussNewton(
       b_icp += -J_icp.transpose() * (error_icp * weight_icp[i]);
     }
     // cost_dir += cost_dir_tmp / cnt_good;
-    cost += cost_dir_tmp;
+    cost_dir += cost_dir_tmp;
+
+    
 
     Vector6d dx;
-    H = H_pnp + H_icp + H_dir;
-    b = b_pnp + b_icp + b_dir;
+    // H = H_pnp + H_icp + H_dir;
+    // b = b_pnp + b_icp + b_dir;
+    H = H_dir;
+    b = b_dir;
     // cout << "HHHHHHHHHH   " << H << endl;
     // cout << "bbbbbbbbbbbbb     " << b << endl;
     dx = H.ldlt().solve(b);
@@ -1768,6 +1807,7 @@ Mat bundleAdjustmentGaussNewton(
       break;
     }
     total_cost = cost_pnp + cost_icp + cost_dir;
+    // total_cost = cost_dir;
     cout << "cost: " << total_cost << ", last cost: " << lastCost << endl;
 
     if (iter > 0 && total_cost >= lastCost) {
