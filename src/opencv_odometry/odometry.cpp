@@ -1540,7 +1540,7 @@ bool RGBDICPOdometryImpl(Mat& Rt, const Mat& initRt,
                 double inv_z = 1.0 / pc[2];
                 double inv_z2 = inv_z * inv_z;
                 Eigen::Vector2d proj(fx * pc[0] / pc[2] + cx, fy * pc[1] / pc[2] + cy);
-                Eigen::Vector2d e = pts_2d_eigen[i] - proj;
+                Eigen::Vector2d e = proj - pts_2d_eigen[i];
                 // "[" << pts_3d_eigen[i][0] << ", " << pts_3d_eigen[i][1] << "]" <<"[" << pc[0] << ", " << pc[1] << "]" <<
                 cout <<  "[" << pts_2d_eigen[i][0] << ", " << pts_2d_eigen[i][1] << "]" << " [" << proj[0] << ", " << proj[1] << "]" << endl;
                 // cout << fx << " " << inv_z << " " << inv_z2 << " " << fx << " " << fy << endl;
@@ -1601,6 +1601,7 @@ bool RGBDICPOdometryImpl(Mat& Rt, const Mat& initRt,
             }
             cout << "old pose " << pose.matrix() << endl;
             pose = Sophus::SE3d::exp(dx) * pose;
+            cout << Sophus::SE3d::exp(dx).matrix() << endl;
             cout << "new pose " << pose.matrix() << endl;
 
             bool solutionExist = solveSystem(AtA, AtB, determinantThreshold, ksi);

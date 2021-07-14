@@ -437,6 +437,19 @@ double calc_residual(
   const Mat &img1,
   const Mat &img2
 );
+double calc_residual_dep(
+   const VecVector3d &points_3d,
+  const VecVector2d &points_2d,
+  const VecVector3d &points_3d_nxt,
+  Sophus::SE3d &pose,
+  const Mat &K,
+  vector<double>& residuals_pnp,
+  vector<double>& residuals_icp,
+  vector<double>& residuals_dir,
+  vector<double>& res_std,
+  const Mat &img1,
+  const Mat &img2
+);
 // useful typedefs
 typedef Eigen::Matrix<double, 6, 6> Matrix6d;
 typedef Eigen::Matrix<double, 2, 6> Matrix26d;
@@ -544,10 +557,15 @@ int main(int argc, char **argv) {
    const int rgbPathLehgth = 17+8;
    const int depthPathLehgth = 17+10;
 
+  // float fx = 525.0f, // default
+  //         fy = 525.0f,
+  //         cx = 319.5f,
+  //         cy = 239.5f;
    float fx = 517.3f, // default
          fy = 516.5f,
          cx = 318.6f,
          cy = 255.3f;
+
    string datas[6000];
    string str1;
    std::getline(file, str1);
@@ -1111,9 +1129,9 @@ int main(int argc, char **argv) {
      Sophus::SE3d pose_gn;
     //  t1 = chrono::steady_clock::now();
      int mode = 0; // 0=huber
-     Mat Rt_baGauss = bundleAdjustmentGaussNewtonPnP(pts_3d_eigen, pts_2d_eigen, K, pose_gn, mode);
+    //  Mat Rt_baGauss = bundleAdjustmentGaussNewtonPnP(pts_3d_eigen, pts_2d_eigen, K, pose_gn, mode);
     //  Mat Rt_baGauss = bundleAdjustmentGaussNewtonICP(pts_3d_eigen, pts_2d_eigen, pts_3d_eigen_nxt, K, pose_gn, mode);
-    // Mat Rt_baGauss = bundleAdjustmentGaussNewtonDir(pts_3d_eigen, pts_2d_eigen, pts_3d_eigen_nxt, K, pose_gn, mode, prevgray, gray);
+    Mat Rt_baGauss = bundleAdjustmentGaussNewtonDir(pts_3d_eigen, pts_2d_eigen, pts_3d_eigen_nxt, K, pose_gn, mode, prevgray, gray);
     //  Mat Rt_baGauss = bundleAdjustmentGaussNewtonDir(pixels_ref, pixels_ref_2d, pts_3d_eigen_nxt, K, pose_gn, mode, prevgray, gray);
     //  Mat Rt_baGauss = bundleAdjustmentGaussNewton(pts_3d_eigen, pts_2d_eigen, pts_3d_eigen_nxt, K, pose_gn, mode, image1, image);
       Mat& prevRtbaGauss = *Rts_ba.rbegin();
@@ -1473,8 +1491,8 @@ void find_feature_matches_another(const Mat &img_1, const Mat &img_2,
   for (int i=0; i<points_3d.size(); i++){
      Eigen::Vector3d pc = pose * points_3d[i];
      Eigen::Vector2d proj(fx * pc[0] / pc[2] + cx, fy * pc[1] / pc[2] + cy);
-     Eigen::Vector2d error_pnp = points_2d[i] - proj;
-     Eigen::Vector3d error_icp = points_3d_nxt[i] - pc;
+     Eigen::Vector2d error_pnp = proj - points_2d[i];
+     Eigen::Vector3d error_icp = pc - points_3d_nxt[i];
     Eigen::Vector2d orig(fx * points_3d[i][0] / points_3d[i][2] + cx, fy * points_3d[i][1] / points_3d[i][2] + cy);
     double error_dir = 0;
     for (int x = -half_patch_size; x <= half_patch_size; x++){
@@ -1498,14 +1516,6 @@ void find_feature_matches_another(const Mat &img_1, const Mat &img_2,
         res_std_dir.push_back(error_dir);
     }
   }
-  // for(int i=0; i<residuals.size(); i++){
-  //   cout << "residual " << residuals[i] << endl;
-  // }
-  // double total = 0;
-  // for(int i=0; i<residuals.size(); i++){
-  //     total += residuals[i] * residuals[i];
-  // }
-  //   cout << "total residual square " << total << endl;
   double avg_pnp = Average(res_std_pnp); 
   double std_pnp = Deviation(res_std_pnp,avg_pnp);
   double avg_icp = Average(res_std_icp); 
@@ -1516,7 +1526,66 @@ void find_feature_matches_another(const Mat &img_1, const Mat &img_2,
   res_std.push_back(std_pnp);
   res_std.push_back(std_icp);
   res_std.push_back(std_dir);
-  // return std;
+}
+double calc_residual_dep(
+   const VecVector3d &points_3d,
+  const VecVector2d &points_2d,
+  const VecVector3d &points_3d_nxt,
+  Sophus::SE3d &pose,
+  const Mat &K,
+  vector<double>& residuals_pnp,
+  vector<double>& residuals_icp,
+  vector<double>& residuals_dir,
+  vector<double>& res_std,
+  const Mat &img1,
+  const Mat &img2
+){
+   double fx = K.at<double>(0, 0);
+  double fy = K.at<double>(1, 1);
+  double cx = K.at<double>(0, 2);
+  double cy = K.at<double>(1, 2);
+  const int half_patch_size = 1;
+  vector<double> res_std_pnp;
+  vector<double> res_std_icp;
+  vector<double> res_std_dir;
+  for (int i=0; i<points_3d.size(); i++){
+     Eigen::Vector3d pc = pose * points_3d[i];
+     Eigen::Vector2d proj(fx * pc[0] / pc[2] + cx, fy * pc[1] / pc[2] + cy);
+     Eigen::Vector2d error_pnp = proj - points_2d[i];
+     Eigen::Vector3d error_icp = pc - points_3d_nxt[i];
+    Eigen::Vector2d orig(fx * points_3d[i][0] / points_3d[i][2] + cx, fy * points_3d[i][1] / points_3d[i][2] + cy);
+    double error_dir = 0;
+    for (int x = -half_patch_size; x <= half_patch_size; x++){
+      for (int y = -half_patch_size; y <= half_patch_size; y++) {
+          double error_dir_tmp = GetPixelValue(img1, orig[0] + x, orig[1] + y) -
+                          GetPixelValue(img2, proj[0] + x, proj[1] + y);
+          error_dir += error_dir_tmp;
+      }
+    }
+    residuals_pnp.push_back(error_pnp.squaredNorm());
+    if (isnan(pc[2]) == false) {
+        res_std_pnp.push_back(error_pnp.squaredNorm());
+    }
+    residuals_icp.push_back(error_icp.squaredNorm());
+    if (isnan(pc[2]) == false) {
+        res_std_icp.push_back(error_icp.squaredNorm());
+    }
+    residuals_dir.push_back(error_dir/9);
+    if (proj[0] < half_patch_size || proj[0] > img2.cols - half_patch_size || proj[1] < half_patch_size ||
+          proj[1] > img2.rows - half_patch_size || isnan(pc[2]) == false) {
+        res_std_dir.push_back(error_dir);
+    }
+  }
+  double avg_pnp = Average(res_std_pnp); 
+  double std_pnp = Deviation(res_std_pnp,avg_pnp);
+  double avg_icp = Average(res_std_icp); 
+  double std_icp = Deviation(res_std_icp,avg_icp);
+  double avg_dir = Average(res_std_dir); 
+  double std_dir = Deviation(res_std_dir,avg_dir);
+  cout << "average " << avg_pnp << " " << avg_icp << endl;
+  res_std.push_back(std_pnp);
+  res_std.push_back(std_icp);
+  res_std.push_back(std_dir);
 }
 Mat bundleAdjustmentGaussNewton(
   const VecVector3d &points_3d,
@@ -1615,7 +1684,7 @@ Mat bundleAdjustmentGaussNewton(
       // PnP
       double inv_z = 1.0 / pc[2];
       double inv_z2 = inv_z * inv_z;
-      Eigen::Vector2d error_pnp = points_2d[i] - proj;
+      Eigen::Vector2d error_pnp = proj - points_2d[i];
       cost_pnp += error_pnp.squaredNorm();
       Eigen::Matrix<double, 2, 6> J_pnp;
       J_pnp << -fx * inv_z,
@@ -1782,8 +1851,7 @@ double calc_residual_dir(
     Eigen::Vector2d orig(fx * points_3d[i][0] / points_3d[i][2] + cx, fy * points_3d[i][1] / points_3d[i][2] + cy);
      for (int x = -half_patch_size; x <= half_patch_size; x++){
         for (int y = -half_patch_size; y <= half_patch_size; y++) {
-            double error_direct = GetPixelValue(img1, orig[0] + x, orig[1] + y) -
-                            GetPixelValue(img2, proj[0] + x, proj[1] + y);
+            double error_direct = GetPixelValue(img2, proj[0] + x, proj[1] + y) - GetPixelValue(img1, orig[0] + x, orig[1] + y);
             error += error_direct;
         }
     }
@@ -1873,8 +1941,9 @@ Mat bundleAdjustmentGaussNewtonDir(
       for (int x = -half_patch_size; x <= half_patch_size; x++){
           for (int y = -half_patch_size; y <= half_patch_size; y++) {
 
-              double error_dir = GetPixelValue(img1, orig[0] + x, orig[1] + y) -
-                          GetPixelValue(img2, proj[0] + x, proj[1] + y);
+              // double error_dir = GetPixelValue(img1, orig[0] + x, orig[1] + y) -
+              //             GetPixelValue(img2, proj[0] + x, proj[1] + y);
+              double error_dir = GetPixelValue(img2, proj[0] + x, proj[1] + y) - GetPixelValue(img1, orig[0] + x, orig[1] + y);
               Eigen::Matrix<double, 2, 6> J_pixel_xi;
               Eigen::Vector2d J_img_pixel;
               J_pixel_xi(0, 0) = fx * Z_inv;
@@ -1900,7 +1969,7 @@ Mat bundleAdjustmentGaussNewtonDir(
               cost_dir_tmp += error_dir * error_dir;
 
               H_dir += J_dir * J_dir.transpose()*weight_dir[i];
-              b_dir += -error_dir * J_dir*weight_dir[i];
+              b_dir += error_dir * J_dir*weight_dir[i];
               total_error_dir += error_dir;
           }
         }
@@ -1973,7 +2042,7 @@ Mat bundleAdjustmentGaussNewtonDir(
       Rt.at<double>(1,3) = pose.matrix()(13);
       Rt.at<double>(2,3) = pose.matrix()(14);
       Rt.at<double>(3,3) = pose.matrix()(15);
-
+      Mat Rt_inv = Rt.inv();
     //   cout << "pose by g-n: \n" << pose.matrix() << endl;
 
       return Rt;
@@ -1995,7 +2064,7 @@ double calc_residual_icp(
      Eigen::Vector3d pc = pose * points_3d[i];
     //  Eigen::Vector2d proj(fx * pc[0] / pc[2] + cx, fy * pc[1] / pc[2] + cy);
     //  Eigen::Vector2d error_pnp = points_2d[i] - proj;
-     Eigen::Vector3d error = points_3d_nxt[i] - pc;
+     Eigen::Vector3d error = pc - points_3d_nxt[i];
      
      residuals.push_back(error.squaredNorm());
       if (isnan(pc[2]) == false) {
@@ -2134,10 +2203,10 @@ Mat bundleAdjustmentGaussNewtonICP(
       Rt.at<double>(1,3) = pose.matrix()(13);
       Rt.at<double>(2,3) = pose.matrix()(14);
       Rt.at<double>(3,3) = pose.matrix()(15);
-
+    Mat Rt_inv = Rt.inv();
     //   cout << "pose by g-n: \n" << pose.matrix() << endl;
 
-      return Rt;
+      return Rt_inv;
 }
 double calc_residual_pnp(
    const VecVector3d &points_3d,
@@ -2155,7 +2224,7 @@ double calc_residual_pnp(
   for (int i=0; i<points_3d.size(); i++){
      Eigen::Vector3d pc = pose * points_3d[i];
      Eigen::Vector2d proj(fx * pc[0] / pc[2] + cx, fy * pc[1] / pc[2] + cy);
-     Eigen::Vector2d error = points_2d[i] - proj;
+     Eigen::Vector2d error = proj - points_2d[i];
      
      residuals.push_back(error.squaredNorm());
       if (isnan(pc[2]) == false) {
@@ -2225,7 +2294,7 @@ Mat bundleAdjustmentGaussNewtonPnP(
       double inv_z = 1.0 / pc[2];
       double inv_z2 = inv_z * inv_z;
       Eigen::Vector2d proj(fx * pc[0] / pc[2] + cx, fy * pc[1] / pc[2] + cy);
-      Eigen::Vector2d e = points_2d[i] - proj;
+      Eigen::Vector2d e = proj - points_2d[i];
       // Eigen::Vector2d e = proj - points_2d[i];
       // cout <<  "[" << points_2d[i][0] << ", " << points_2d[i][1] << "]" << " [" << proj[0] << ", " << proj[1] << "]" << endl;
       // cout << fx << " " << inv_z << " " << inv_z2 << " " << fx << " " << fy << endl;
@@ -2319,8 +2388,8 @@ Mat bundleAdjustmentGaussNewtonPnP(
       Rt.at<double>(3,3) = pose.matrix()(15);
 
     //   cout << "pose by g-n: \n" << pose.matrix() << endl;
-
-      return Rt;
+    Mat Rt_inv = Rt.inv();
+      return Rt_inv;
 }
 /// vertex and edges used in g2o ba
 class VertexPose : public g2o::BaseVertex<6, Sophus::SE3d> {
