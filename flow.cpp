@@ -1,4 +1,5 @@
 #include <iostream>
+#include <string.h>
 #include <opencv2/core/core.hpp>
 #include <opencv2/features2d/features2d.hpp>
 #include <opencv2/highgui/highgui.hpp>
@@ -6,6 +7,8 @@
 #include <opencv2/xfeatures2d.hpp>
 #include <opencv2/xfeatures2d/nonfree.hpp>
 #include <opencv2/opencv.hpp>
+#include <opencv2/imgproc.hpp>
+#include <opencv2/imgcodecs.hpp>
 
 
 #include <g2o/core/base_vertex.h>
@@ -20,341 +23,96 @@
 
 #include <opencv2/core/eigen.hpp>
 
+#include <complex>      // std::complex, std::abs
+
 #include <chrono>
 #include <iostream>
 #include <fstream>
 #include <string>
 #include <vector>
 #include <cmath>
-#include<math.h>   
+#include <math.h>   
 using namespace std;
 using namespace cv;
 
 #define UNKNOWN_FLOW_THRESH 1e9  
 
-void find_features(const Mat &img_1, const Mat &img_2,
-                           std::vector<KeyPoint> &keypoints_1,
-			                  std::vector<KeyPoint> &keypoints_2,
-                           std::vector<DMatch> &matches,
-                           const Mat &img_3) {
 
-   Mat descriptors_1, descriptors_2, descriptors_3, descriptors_4;
-   Ptr<FeatureDetector> detector = BRISK::create();
-   Ptr<DescriptorExtractor> descriptor = BRISK::create();
-   Ptr<FeatureDetector> detector2 = KAZE::create();
-   Ptr<DescriptorExtractor> descriptor2 = KAZE::create();
-   // Ptr<DescriptorMatcher> matcher = DescriptorMatcher::create("BruteForce-Hamming");
-   Ptr<DescriptorMatcher> matcher = DescriptorMatcher::create("FlannBased");
-   // cv::FlannBasedMatcher matcher = cv::FlannBasedMatcher(cv::makePtr<cv::flann::LshIndexParams>(12, 20, 2));
-   detector->detect(img_1, keypoints_1);
-   detector->detect(img_2, keypoints_2);
-   cout << "keypoints_1.size() "<< keypoints_1.size() << " keypoints_2.size() " << keypoints_2.size() << endl;
-   if(keypoints_1.size() == 0 || keypoints_2.size() == 0){
-     keypoints_1.clear();
-     keypoints_2.clear();
-     detector = KAZE::create();
-     descriptor = KAZE::create();
-     detector->detect(img_1, keypoints_1);
-    detector->detect(img_2, keypoints_2);
-   }
-   // if(keypoints_1.size() != 0 && keypoints_2.size() != 0){
-      
-      descriptor->compute(img_1, keypoints_1, descriptors_1);
-      descriptor->compute(img_2, keypoints_2, descriptors_2);
-   // }
-   // cout << "des1 " << descriptors_1  << "des2 " << descriptors_2 << endl;
-   int eee = descriptors_1.empty();
-   int ddd = descriptors_2.empty();
-   vector<DMatch> match;
-   vector<vector<DMatch>> knn_matches; 
-   descriptors_1.convertTo(descriptors_1, CV_32F);
-   descriptors_2.convertTo(descriptors_2, CV_32F);
-   matcher->knnMatch( descriptors_1, descriptors_2, knn_matches, 2);
-    const float ratio_thresh = 0.7f;
-   //  std::vector<DMatch> good_matches;
-    for (size_t i = 0; i < knn_matches.size(); i++)
-    {
-        if (knn_matches[i][0].distance < ratio_thresh * knn_matches[i][1].distance)
-        {
-            matches.push_back(knn_matches[i][0]);
-        }
-    }
- }
- void find_features2(const Mat &img_1, const Mat &img_2,
-                           std::vector<KeyPoint> &keypoints_1,
-			                  std::vector<KeyPoint> &keypoints_2,
-                           std::vector<DMatch> &matches,
-                           const Mat &img_3) {
-
-   Mat descriptors_1, descriptors_2, descriptors_3, descriptors_4;
-   Ptr<FeatureDetector> detector = KAZE::create();
-   Ptr<DescriptorExtractor> descriptor = KAZE::create();
-   // Ptr<DescriptorMatcher> matcher = DescriptorMatcher::create("BruteForce-Hamming");
-   Ptr<DescriptorMatcher> matcher = DescriptorMatcher::create("FlannBased");
-   // cv::FlannBasedMatcher matcher = cv::FlannBasedMatcher(cv::makePtr<cv::flann::LshIndexParams>(12, 20, 2));
-   detector->detect(img_1, keypoints_1);
-   detector->detect(img_2, keypoints_2);
-   cout << "keypoints_1.size() "<< keypoints_1.size() << " keypoints_2.size() " << keypoints_2.size() << endl;
-   // if(keypoints_1.size() != 0 && keypoints_2.size() != 0){
-      
-      descriptor->compute(img_1, keypoints_1, descriptors_1);
-      descriptor->compute(img_2, keypoints_2, descriptors_2);
-   // }
-   // cout << "des1 " << descriptors_1  << "des2 " << descriptors_2 << endl;
-   int eee = descriptors_1.empty();
-   int ddd = descriptors_2.empty();
-   vector<DMatch> match;
-   vector<vector<DMatch>> knn_matches; 
-   descriptors_1.convertTo(descriptors_1, CV_32F);
-   descriptors_2.convertTo(descriptors_2, CV_32F);
-   matcher->knnMatch( descriptors_1, descriptors_2, knn_matches, 2);
-    const float ratio_thresh = 0.7f;
-   //  std::vector<DMatch> good_matches;
-    for (size_t i = 0; i < knn_matches.size(); i++)
-    {
-        if (knn_matches[i][0].distance < ratio_thresh * knn_matches[i][1].distance)
-        {
-            matches.push_back(knn_matches[i][0]);
-        }
-    }
- }
 
 static
-void computeProjectiveMatrixInv(const Mat& ksi, Mat& Rt)
-{
-    CV_Assert(ksi.size() == Size(1,6) && ksi.type() == CV_64FC1);
-
-// #ifdef HAVE_EIGEN3_HERE
-//     const double* ksi_ptr = ksi.ptr<const double>();
-//     Eigen::Matrix<double,4,4> twist, g;
-//     twist << 0.,          -ksi_ptr[2], ksi_ptr[1],  ksi_ptr[3],
-//              ksi_ptr[2],  0.,          -ksi_ptr[0], ksi_ptr[4],
-//              -ksi_ptr[1], ksi_ptr[0],  0,           ksi_ptr[5],
-//              0.,          0.,          0.,          0.;
-//     g = twist.exp();
-
-//     eigen2cv(g, Rt);
-// #else
-    // TODO: check computeProjectiveMatrix when there is not eigen library,
-    //       because it gives less accurate pose of the camera
-    Rt = Mat::eye(4, 4, CV_64FC1);
-    Mat R = Rt(Rect(0,0,3,3)); // 左上角x 左上角y width height
-    // cout << "Rt1" << Rt << R << endl;
-    // cout << "compute" << ksi.rowRange(0,3) << ksi.rowRange(0,2) << ksi << endl;
-    Mat rvec = ksi.rowRange(3,6);
-
-    Rodrigues(rvec, R);
-    // cout << "Rt2" << Rt << R << endl;
-    Rt.at<double>(0,3) = ksi.at<double>(0);
-    Rt.at<double>(1,3) = ksi.at<double>(1);
-    Rt.at<double>(2,3) = ksi.at<double>(2);
-    // cout << "Rt3" << Rt << endl;
-// #endif
-}
+void computeProjectiveMatrixInv(const Mat& ksi, Mat& Rt);
 
 static
-void computeProjectiveMatrix(const Mat& ksi, Mat& Rt)
-{
-    CV_Assert(ksi.size() == Size(1,6) && ksi.type() == CV_64FC1);
-
-// #ifdef HAVE_EIGEN3_HERE
-//     const double* ksi_ptr = ksi.ptr<const double>();
-//     Eigen::Matrix<double,4,4> twist, g;
-//     twist << 0.,          -ksi_ptr[2], ksi_ptr[1],  ksi_ptr[3],
-//              ksi_ptr[2],  0.,          -ksi_ptr[0], ksi_ptr[4],
-//              -ksi_ptr[1], ksi_ptr[0],  0,           ksi_ptr[5],
-//              0.,          0.,          0.,          0.;
-//     g = twist.exp();
-
-//     eigen2cv(g, Rt);
-// #else
-    // TODO: check computeProjectiveMatrix when there is not eigen library,
-    //       because it gives less accurate pose of the camera
-    Rt = Mat::eye(4, 4, CV_64FC1);
-
-    Mat R = Rt(Rect(0,0,3,3)); // 左上角x 左上角y width height
-    // cout << "Rt1" << Rt << R << endl;
-    // cout << "compute" << ksi.rowRange(0,3) << ksi.rowRange(0,2) << ksi << endl;
-    Mat rvec = ksi.rowRange(0,3);
-
-    Rodrigues(rvec, R);
-    // cout << "Rt2" << Rt << R << endl;
-    Rt.at<double>(0,3) = ksi.at<double>(3);
-    Rt.at<double>(1,3) = ksi.at<double>(4);
-    Rt.at<double>(2,3) = ksi.at<double>(5);
-    // cout << "Rt3" << Rt << endl;
-// #endif
-}
+void computeProjectiveMatrix(const Mat& ksi, Mat& Rt);
 
 // bilinear interpolation
-inline float GetPixelValue(const cv::Mat &img, float x, float y) {
-    // boundary check
-    if (x < 0) x = 0;
-    if (y < 0) y = 0;
-    if (x >= img.cols) x = img.cols - 1;
-    if (y >= img.rows) y = img.rows - 1;
-    uchar *data = &img.data[int(y) * img.step + int(x)];
-    float xx = x - floor(x);
-    float yy = y - floor(y);
-    return float(
-        (1 - xx) * (1 - yy) * data[0] +
-        xx * (1 - yy) * data[1] +
-        (1 - xx) * yy * data[img.step] +
-        xx * yy * data[img.step + 1]
-    );
-}
-//AVERAGE
-double Average(vector<double> v)
-{      double sum=0;
-       for(int i=0;i<v.size();i++)
-               sum+=v[i];
-       return sum/v.size();
-}
-//DEVIATION
-double Deviation(vector<double> v, double ave)
-{
-       double E=0;
-       for(int i=0;i<v.size();i++){
-               E+=(v[i] - ave)*(v[i] - ave);
-       }
-       return sqrt(E/v.size());
-}
+inline float GetPixelValue(const cv::Mat &img, float x, float y);
+// average
+double Average(vector<double> v);
+// deviation
+double Deviation(vector<double> v, double ave);
+
 // Color encoding of flow vectors from:  
 // http://members.shaw.ca/quadibloc/other/colint.htm  
 // This code is modified from:  
 // http://vision.middlebury.edu/flow/data/  
-void makecolorwheel(vector<Scalar> &colorwheel)  
-{  
-    int RY = 15;  
-    int YG = 6;  
-    int GC = 4;  
-    int CB = 11;  
-    int BM = 13;  
-    int MR = 6;  
-  
-    int i;  
-  
-    for (i = 0; i < RY; i++) colorwheel.push_back(Scalar(255,       255*i/RY,     0));  
-    for (i = 0; i < YG; i++) colorwheel.push_back(Scalar(255-255*i/YG, 255,       0));  
-    for (i = 0; i < GC; i++) colorwheel.push_back(Scalar(0,         255,      255*i/GC));  
-    for (i = 0; i < CB; i++) colorwheel.push_back(Scalar(0,         255-255*i/CB, 255));  
-    for (i = 0; i < BM; i++) colorwheel.push_back(Scalar(255*i/BM,      0,        255));  
-    for (i = 0; i < MR; i++) colorwheel.push_back(Scalar(255,       0,        255-255*i/MR));  
-}  
-  
-void motionToColor(Mat flow, Mat &color)  
-{  
-    if (color.empty())  
-        color.create(flow.rows, flow.cols, CV_8UC3);  
-  
-    static vector<Scalar> colorwheel; //Scalar r,g,b  
-    if (colorwheel.empty())  
-        makecolorwheel(colorwheel);  
-  
-    // determine motion range:  
-    float maxrad = -1;  
-  
-    // Find max flow to normalize fx and fy  
-    for (int i= 0; i < flow.rows; ++i)   
-    {  
-        for (int j = 0; j < flow.cols; ++j)   
-        {  
-            Vec2f flow_at_point = flow.at<Vec2f>(i, j);  
-            float fx = flow_at_point[0];  
-            float fy = flow_at_point[1];  
-            if ((fabs(fx) >  UNKNOWN_FLOW_THRESH) || (fabs(fy) >  UNKNOWN_FLOW_THRESH))  
-                continue;  
-            float rad = sqrt(fx * fx + fy * fy);  
-            maxrad = maxrad > rad ? maxrad : rad;  
-        }  
-    }  
-  
-    for (int i= 0; i < flow.rows; ++i)   
-    {  
-        for (int j = 0; j < flow.cols; ++j)   
-        {  
-            uchar *data = color.data + color.step[0] * i + color.step[1] * j;  
-            Vec2f flow_at_point = flow.at<Vec2f>(i, j);  
-  
-            float fx = flow_at_point[0] / maxrad;  
-            float fy = flow_at_point[1] / maxrad;  
-            if ((fabs(fx) >  UNKNOWN_FLOW_THRESH) || (fabs(fy) >  UNKNOWN_FLOW_THRESH))  
-            {  
-                data[0] = data[1] = data[2] = 0;  
-                continue;  
-            }  
-            float rad = sqrt(fx * fx + fy * fy);  
-  
-            float angle = atan2(-fy, -fx) / CV_PI;  
-            float fk = (angle + 1.0) / 2.0 * (colorwheel.size()-1);  
-            int k0 = (int)fk;  
-            int k1 = (k0 + 1) % colorwheel.size();  
-            float f = fk - k0;  
-            //f = 0; // uncomment to see original color wheel  
-  
-            for (int b = 0; b < 3; b++)   
-            {  
-                float col0 = colorwheel[k0][b] / 255.0;  
-                float col1 = colorwheel[k1][b] / 255.0;  
-                float col = (1 - f) * col0 + f * col1;  
-                if (rad <= 1)  
-                    col = 1 - rad * (1 - col); // increase saturation with radius  
-                else  
-                    col *= .75; // out of range  
-                data[2 - b] = (int)(255.0 * col);  
-            }  
-        }  
-    }  
-}  
-void writeResults( const string& filename, const vector<string>& timestamps, const vector<Mat>& Rt )
-{
-    CV_Assert( timestamps.size() == Rt.size() );
+void makecolorwheel(vector<Scalar> &colorwheel);
+void motionToColor(Mat flow, Mat &color);
 
-    ofstream file( filename.c_str() );
-    if( !file.is_open() )
-        return;
+void writeResults( const string& filename, const vector<string>& timestamps, const vector<Mat>& Rt );
 
-    cout.precision(4);
-    for( size_t i = 0; i < Rt.size(); i++ )
-    {
-        const Mat& Rt_curr = Rt[i];
-        if( Rt_curr.empty() )
-            continue;
+void find_feature_matches_orb(
+ const Mat &img_1, const Mat &img_2, std::vector<KeyPoint> &keypoints_1,vector<KeyPoint> &keypoints_2,std::vector<DMatch> &matches, int level);
+void find_feature_matches_brisk(
+ const Mat &img_1, const Mat &img_2, std::vector<KeyPoint> &keypoints_1,vector<KeyPoint> &keypoints_2,std::vector<DMatch> &matches);
+void find_features_matches_kaze(
+  const Mat &prev_img, const Mat &curr_img,vector<KeyPoint> &keypoints_prev,vector<KeyPoint> &keypoints_curr,vector<DMatch> &matches
+);
 
-        CV_Assert( Rt_curr.type() == CV_64FC1 );
+void showMotion(
+ const Mat &img_1, const Mat &img_2, const Mat &prevgray, const Mat &gray, const Mat &flow);
+void find_right_points(
+  vector<Point2f> &right_points_to_find, vector<int> &right_points_to_find_back_index, std::vector<KeyPoint> &keypoints_prev,vector<KeyPoint> &keypoints_curr, vector<Point2f> &pts
+);
+void find_nearest_neighbors(
+  vector<Point2f> &right_points_to_find, vector<vector<DMatch>> &nearest_neighbors, vector<int> &right_points_to_find_back_index, const Mat &img_1, const Mat &img_2, std::vector<KeyPoint> &keypoints_1,vector<KeyPoint> &keypoints_2, vector<DMatch> &matches
+);
+void find_no_matching(vector<Mat> &Rts_ba, vector<string> &timestamps);
+void ransac_matching(vector<DMatch> &match_inliers, vector<DMatch> &matches, const int minNumberMatchesAllowed,vector<KeyPoint> &keypoints_prev, vector<KeyPoint> &keypoints_curr);
+void match_points(
+  vector<Point3f> &pts_3d, vector<Point2f> &pts_2d, vector<Point3f> &pts_3d_nxt, vector<KeyPoint> &keys1, vector<KeyPoint> &keys2,vector<KeyPoint> &keypoints_prev, vector<KeyPoint> &keypoints_curr,vector<Point2f> &points1, vector<Point2f> &points2, vector<DMatch> &matches, const Mat &prev_depth, const Mat &curr_depth, const Mat &K
+);
 
-        Mat R = Rt_curr(Rect(0,0,3,3)), rvec;
-        Rodrigues(R, rvec);
-        double alpha = norm( rvec );
-        if(alpha > DBL_MIN)
-            rvec = rvec / alpha;
 
-        double cos_alpha2 = std::cos(0.5 * alpha);
-        double sin_alpha2 = std::sin(0.5 * alpha);
-
-        rvec *= sin_alpha2;
-
-        CV_Assert( rvec.type() == CV_64FC1 );
-        // timestamp tx ty tz qx qy qz qw
-        file << timestamps[i] << " " << fixed
-             << Rt_curr.at<double>(0,3) << " " << Rt_curr.at<double>(1,3) << " " << Rt_curr.at<double>(2,3) << " "
-             << rvec.at<double>(0) << " " << rvec.at<double>(1) << " " << rvec.at<double>(2) << " " << cos_alpha2 << endl;
-
-    }
-    file.close();
-}
-
-void find_feature_matches(
- const Mat &img_1, const Mat &img_2, std::vector<KeyPoint> &keypoints_1,vector<KeyPoint> &keypoints_2,std::vector<DMatch> &matches, const Mat &img_3);
- void find_feature_matches_another(
- const Mat &img_1, const Mat &img_2, std::vector<KeyPoint> &keypoints_1,vector<KeyPoint> &keypoints_2,std::vector<DMatch> &matches, const Mat &img_3);
+void visualize_flow(
+  const Mat &prevgray, const Mat &gray, vector<Point2f> &points1, vector<Point2f> &points2, vector<KeyPoint> &keys2, int i
+);
+void pnp_append_rt(const Mat &r, const Mat &t, vector<Mat> &Rts, const Mat &inliers, vector<KeyPoint> &keypoints_prev, vector<KeyPoint> &keypoints_curr, vector<Point3f> &pts_3d);
 
 // // 像素坐标转相机归一化坐标
- Point2d pixel2cam(const Point2d &p, const Mat &K);
+Point2d pixel2cam(const Point2d &p, const Mat &K);
 
 // BA by g2o
 typedef vector<Eigen::Vector2d, Eigen::aligned_allocator<Eigen::Vector2d>> VecVector2d;
 typedef vector<Eigen::Vector3d, Eigen::aligned_allocator<Eigen::Vector3d>> VecVector3d;
+
+void match_dir_points(
+  VecVector3d &pts_3d_eigen_new, VecVector2d &pts_2d_eigen_new, VecVector3d &pts_3d_eigen_nxt_new, const Mat &prevgray, const Mat &gray, const Mat &prev_depth, const Mat &curr_depth, const Mat &K, Mat &grad_x, 
+  Mat &grad_y
+);
+
+void BAg2o(
+  const VecVector3d &points_3d,
+  const VecVector2d &points_2d,
+  const Mat &K,
+  const string& filename, 
+  const vector<string>& timestamps,
+  vector<Mat> &Rts_ba,
+  Mat &Rt_ba,
+  VecVector3d pts_3d_eigen,
+  VecVector2d pts_2d_eigen
+);
+
 // BA by gauss-newton
 Mat bundleAdjustmentGaussNewtonPnP(
   const VecVector3d &points_3d,
@@ -379,7 +137,9 @@ Mat bundleAdjustmentGaussNewtonDir(
   Sophus::SE3d &pose,
   int mode,
   const Mat &img1,
-  const Mat &img2
+  const Mat &img2,
+  const Mat &grad_x, 
+  const Mat &grad_y
 );
 double calc_residual_dir(
    const VecVector3d &points_3d,
@@ -535,627 +295,818 @@ Mat DirectPoseEstimationSingleLayer(
     const vector<float> depth_ref,
     Sophus::SE3d &T21
 );
+// directPoseEstimation
+void directPoseEstimation(
+  cv::RNG rng, 
+  int nPoints, 
+  const Mat &prevgray, 
+  const Mat &gray, 
+  VecVector3d pixels_ref, 
+  const vector <float> depth_ref, 
+  const Mat &prev_depth,
+  int border
+);
+
+static
+void preparePyramidImage(const Mat& image, std::vector<Mat>& pyramidImage, size_t levelCount) // levelCount=4
+{
+    if(!pyramidImage.empty())
+    {
+        if(pyramidImage.size() < levelCount)
+            CV_Error(Error::StsBadSize, "Levels count of pyramidImage has to be equal or less than size of iterCounts.");
+
+        CV_Assert(pyramidImage[0].size() == image.size());
+        for(size_t i = 0; i < pyramidImage.size(); i++)
+            CV_Assert(pyramidImage[i].type() == image.type());
+    }
+    else
+        buildPyramid(image, pyramidImage, (int)levelCount - 1);
+}
+
+static
+void preparePyramidDepth(const Mat& depth, std::vector<Mat>& pyramidDepth, size_t levelCount)
+{
+    if(!pyramidDepth.empty())
+    {
+        if(pyramidDepth.size() < levelCount)
+            CV_Error(Error::StsBadSize, "Levels count of pyramidDepth has to be equal or less than size of iterCounts.");
+
+        CV_Assert(pyramidDepth[0].size() == depth.size());
+        for(size_t i = 0; i < pyramidDepth.size(); i++)
+            CV_Assert(pyramidDepth[i].type() == depth.type());
+    }
+    else
+        buildPyramid(depth, pyramidDepth, (int)levelCount - 1);
+
+}
+static
+void buildPyramidCameraMatrix(const Mat& cameraMatrix, int levels, std::vector<Mat>& pyramidCameraMatrix) //levels = 4
+{
+    pyramidCameraMatrix.resize(levels);
+    Mat cameraMatrix_dbl;
+    cameraMatrix.convertTo(cameraMatrix_dbl, CV_64FC1);
+    for(int i = 0; i < levels; i++)
+    {
+        Mat levelCameraMatrix = i == 0 ? cameraMatrix_dbl : 0.5f * pyramidCameraMatrix[i-1];
+        levelCameraMatrix.at<double>(2,2) = 1.;
+        pyramidCameraMatrix[i] = levelCameraMatrix;
+    }
+}
+
+// vector<int> nlevels{8,8,6,4};
+// vector<int> patchSizes{31, 25, 15, 8};
+vector<int> nlevels{8,8,6,4};
+vector<int> patchSizes{31, 25, 15, 8};
+vector<int> edgeThresholds = patchSizes;
+
 int main(int argc, char **argv) {
-	if(argc != 4){
-        cout << "Format: file_with_rgb_depth_pairs trajectory_file odometry_name [Rgbd or ICP or RgbdICP or FastICP]" << endl;
-        return -1;
-   }
+	if(argc != 5){
+    cout << "Format: file_with_rgb_depth_pairs trajectory_file odometry_name [Rgbd or ICP or RgbdICP or FastICP]" << endl;
+    return -1;
+  }
 
-   vector<string> timestamps;
-   vector<Mat> Rts, Rts_ba;
-    Rts.push_back(Mat::eye(4,4,CV_64FC1));
-   Rts_ba.push_back(Mat::eye(4,4,CV_64FC1));
-   const string filename = argv[1];
-   ifstream file( filename.c_str() );
-   if( !file.is_open() )
-      return -1;
-   char dlmrt = '/';
-   size_t pos = filename.rfind(dlmrt);
-   string dirname = pos == string::npos ? "" : filename.substr(0, pos) + dlmrt;
+  vector<string> timestamps;
+  vector<Mat> Rts, Rts_ba;
+  Rts.push_back(Mat::eye(4,4,CV_64FC1));
+  Rts_ba.push_back(Mat::eye(4,4,CV_64FC1));
+  const string filename = argv[1];
+  ifstream file( filename.c_str() );
+  if( !file.is_open() )
+    return -1;
+  char dlmrt = '/';
+  size_t pos = filename.rfind(dlmrt);
+  string dirname = pos == string::npos ? "" : filename.substr(0, pos) + dlmrt;
 
-   const int timestampLength = 17;
-   const int rgbPathLehgth = 17+8;
-   const int depthPathLehgth = 17+10;
+  const int timestampLength = 17;
+  const int rgbPathLehgth = 17+8;
+  const int depthPathLehgth = 17+10;
 
   // float fx = 525.0f, // default
   //         fy = 525.0f,
   //         cx = 319.5f,
   //         cy = 239.5f;
-   float fx = 517.3f, // default
-         fy = 516.5f,
-         cx = 318.6f,
-         cy = 255.3f;
+  float fx, fy, cx, cy;
+  if(strcmp(argv[4], "1") == 0){
+        fx = 517.3f; // freiburg 1 RGB
+        fy = 516.5f;
+        cx = 318.6f;
+        cy = 255.3f;
+  }
+  else {
+        fx = 520.9f; // freiburg 2 RGB
+        fy = 521.0f;
+        cx = 325.1f;
+        cy = 249.7f;
+  }
 
-   string datas[6000];
-   string str1;
-   std::getline(file, str1);
-    datas[0] = str1;
-   string timestap3 = str1.substr(0, timestampLength);
-   timestamps.push_back(timestap3);
-        
-    for(int i = 1; !file.eof(); i++){
-        string str;
-        std::getline(file, str);
-        datas[i] = str;
-        if(str.empty()) break;
-        if(str.at(0) == '#') continue; /* comment */
-        cout << " previous image: " << datas[i-1] << "\n" << " current image "<< str << endl;
-        cout << "第 " << i << " 張圖片" << endl;
-        Mat image, depth, image1, depth1, image2, depth2;
-        // if(i > 2) {
-        //     string rgbFilename2 = datas[i-2].substr(timestampLength + 1, rgbPathLehgth );
-        //     string timestap2 = datas[i-2].substr(0, timestampLength);
-        //     string depthFilename2 = datas[i-2].substr(2*timestampLength + rgbPathLehgth + 3, depthPathLehgth );
 
-        //     image2 = imread(dirname + rgbFilename2);
-        //     depth2 = imread(dirname + depthFilename2, -1);
-        // }
-        
-        string rgbFilename1 = datas[i-1].substr(timestampLength + 1, rgbPathLehgth );
-        string timestap1 = datas[i-1].substr(0, timestampLength);
-        string depthFilename1 = datas[i-1].substr(2*timestampLength + rgbPathLehgth + 3, depthPathLehgth );
-        image1 = imread(dirname + rgbFilename1);
-        depth1 = imread(dirname + depthFilename1, -1);
+  Mat K = (Mat_<double>(3, 3) << fx, 0, cx, 0, fy, cy, 0, 0, 1); // freiburg 1 RGB
+  string datas[6000], firstFile;
+  std::getline(file, firstFile);
+  datas[0] = firstFile;
+  string timestamp = firstFile.substr(0, timestampLength);
+  timestamps.push_back(timestamp);
+  Sophus::SE3d pose_gn_dir;
+  for(int i = 1; !file.eof(); i++){
+    string curr_file;
+    std::getline(file, curr_file);
+    datas[i] = curr_file;
+    if(curr_file.empty()) break;
+    if(curr_file.at(0) == '#') continue; /* comment */
+    cout << " previous image: " << datas[i-1] << "\n" << " current image "<< curr_file << endl;
+    cout << "第 " << i << " 張圖片" << endl;
+    Mat curr_img, curr_depth, prev_img, prev_depth, image2, depth2;
+    // image1 = prev_img, prev_depth
+    // image = curr_img, curr_depth
+    // if(i > 2) {
+    //     string rgbFilename2 = datas[i-2].substr(timestampLength + 1, rgbPathLehgth );
+    //     string timestamp2 = datas[i-2].substr(0, timestampLength);
+    //     string depthFilename2 = datas[i-2].substr(2*timestampLength + rgbPathLehgth + 3, depthPathLehgth );
+
+    //     image2 = imread(dirname + rgbFilename2);
+    //     depth2 = imread(dirname + depthFilename2, -1);
+    // }
+    string rgbFilename_prev = datas[i-1].substr(timestampLength + 1, rgbPathLehgth );
+    string timestamp_prev = datas[i-1].substr(0, timestampLength);
+    string depthFilename_prev = datas[i-1].substr(2*timestampLength + rgbPathLehgth + 3, depthPathLehgth );
+    prev_img = imread(dirname + rgbFilename_prev);
+    prev_depth = imread(dirname + depthFilename_prev, -1);
+
+    string rgbFilename_curr = curr_file.substr(timestampLength + 1, rgbPathLehgth );
+    string timestamp_curr = curr_file.substr(0, timestampLength);
+    string depthFilename_curr = curr_file.substr(2*timestampLength + rgbPathLehgth + 3, depthPathLehgth );
+    curr_img = imread(dirname + rgbFilename_curr);
+    curr_depth = imread(dirname + depthFilename_curr, -1);
+
+    // Mat depth_flt, depth_flt1;
+    // depth1.convertTo(depth_flt1, CV_32FC1, 1.f/5000.f);
+    // depth1 = depth_flt1;
+    // depth.convertTo(depth_flt, CV_32FC1, 1.f/5000.f);
+    // depth = depth_flt;
+    // cout << "prev prev " << datas[i-2] << " previous image: " << datas[i-1] << " current image "<< str << endl;
+    // CV_Assert(!image.empty());
+    // CV_Assert(!depth.empty());
+    // CV_Assert(!image1.empty());
+    // CV_Assert(!depth1.empty());
+    // CV_Assert(depth.type() == CV_16UC1);
+    // CV_Assert(depth1.type() == CV_16UC1);
+
+    // if(i > 2){
+    //     CV_Assert(!image2.empty());
+    //     CV_Assert(!depth2.empty()); 
+    //     CV_Assert(depth2.type() == CV_16UC1);
+    // }
+    cout << CV_16UC1 << " " << curr_img.type() << " " << prev_img.type() << " " << curr_depth.type() << " " << prev_depth.type() << "hi " << curr_img.channels() << " " << prev_img.channels() << endl;
+    Mat prevgray, gray, flow, cflow;  
+    // showMotion(prev_img, curr_img, prevgray, gray, flow);
     
-        string rgbFilename = str.substr(timestampLength + 1, rgbPathLehgth );
-        string timestap = str.substr(0, timestampLength);
-        string depthFilename = str.substr(2*timestampLength + rgbPathLehgth + 3, depthPathLehgth );
-        image = imread(dirname + rgbFilename);
-        depth = imread(dirname + depthFilename, -1);
+    std::swap(prev_img, curr_img);  
+    std::swap(prev_depth, curr_depth);
+    // for(int i=0; i<curr_depth.rows; i++){
+    //   for(int j=0; j<curr_depth.cols; j++){
+    //       ushort d = prev_depth.ptr<unsigned short>(i)[j];
+    //       ushort d_nxt = curr_depth.ptr<unsigned short>(i)[j];
+    //       cout << i << "," << j << " " << d_nxt << endl;
+    //   }
+    // }
 
-        
-        
-        // Mat depth_flt, depth_flt1;
-        // depth1.convertTo(depth_flt1, CV_32FC1, 1.f/5000.f);
-        // depth1 = depth_flt1;
-        // depth.convertTo(depth_flt, CV_32FC1, 1.f/5000.f);
-        // depth = depth_flt;
-        // cout << "prev prev " << datas[i-2] << " previous image: " << datas[i-1] << " current image "<< str << endl;
-        // CV_Assert(!image.empty());
-        // CV_Assert(!depth.empty());
-        // CV_Assert(!image1.empty());
-        // CV_Assert(!depth1.empty());
-        // CV_Assert(depth.type() == CV_16UC1);
-        // CV_Assert(depth1.type() == CV_16UC1);
+    // now that curr_img is the first img, prev_img is the second img, depth is also changed
+    cvtColor(prev_img, prevgray, COLOR_BGR2GRAY);
+    cvtColor(curr_img, gray, COLOR_BGR2GRAY);
 
-        // if(i > 2){
-        //     CV_Assert(!image2.empty());
-        //     CV_Assert(!depth2.empty()); 
-        //     CV_Assert(depth2.type() == CV_16UC1);
-        // }
-        cout << CV_16UC1 << " " << image.type() << " " << image1.type() << " " << depth.type() << " " << depth1.type() << endl;
-    cout << "hi " << image.channels() << " " << image1.channels() << endl;
-        Mat prevgray, gray, flow, cflow;  
-        // namedWindow("flow", WINDOW_NORMAL);  
-        // Mat motion2color;   
-        // chrono::steady_clock::time_point t1 = chrono::steady_clock::now();
-        // imshow("original", image1);  
-        cvtColor(image1, prevgray, COLOR_BGR2GRAY);
-        cvtColor(image, gray, COLOR_BGR2GRAY);
-        cout << CV_16UC1 << " " << prevgray.type() << " " << gray.type() << " " << depth.type() << " " << depth1.type() << endl;
-    cout << "hi " << prevgray.channels() << " " << gray.channels() << endl;
-        // calcOpticalFlowFarneback(prevgray, gray, flow, 0.5, 3, 15, 3, 5, 1.2, 0); 
-        // cout << flow.size() << endl;
-        // motionToColor(flow, motion2color);  
-        // imshow("flow", motion2color);
-        
-//         if(waitKey(10)>=0)  
-//             break;  
-        
-
-        std::swap(image1, image);  
-        std::swap(depth1, depth);
-
-        cvtColor(image1, prevgray, COLOR_BGR2GRAY);
-        cvtColor(image, gray, COLOR_BGR2GRAY);
-        // cout << "======================================" << endl;
-        // cout << prevgray << endl;
-        // exit(1);
-        // cout << endl;
-        // cout << endl;
-        // cout << endl;
-        // cout << endl;
-        // cout << endl;
-        // cout << endl;
-        // cout << endl;
-        // cout << endl;
-        // cout << endl;
-        // cout << endl;
-        // cout << endl;
-        // cout << endl;
-        // cout << endl;
-        // cout << endl;
-        // cout << endl;
-        // cout << endl;
-        // cout << endl;
-        // cout << endl;
-        // cout << endl;
-        // cout << endl;
-        // cout << endl;
-        // cout << endl;
-        // cout << endl;
-        // cout << endl;
-        // cout << endl;
-        // cout << endl;
-        // cout << endl;
-        // cout << endl;
-        // cout << endl;
-        // cout << endl;
-        // cout << endl;
-        // cout << endl;
-        // cout << "======================================" << endl;
-        // cout << gray << endl;
-        // exit(1);
-        // cout << "======================================" << endl;
-        // cout << depth1 << endl;
-        // cout << endl;
-        // cout << endl;
-        // cout << endl;
-        // cout << endl;
-        // cout << endl;
-        // cout << endl;
-        // cout << endl;
-        // cout << endl;
-        // cout << endl;
-        // cout << endl;
-        // cout << endl;
-        // cout << endl;
-        // cout << endl;
-        // cout << endl;
-        // cout << endl;
-        // cout << endl;
-        // cout << "======================================" << endl;
-        // cout << depth << endl;
-        // exit(1);
-        // chrono::steady_clock::time_point t2 = chrono::steady_clock::now();
-        // chrono::duration<double> time_used = chrono::duration_cast<chrono::duration<double>>(t2 - t1);
-        // cout << "solve optical flow cost time: " << time_used.count() << " seconds." << endl;
-        std::vector<KeyPoint> keypoints_1, keypoints_2, key1, key2;
+    std::vector<Mat> prev_pyramidImage, curr_pyramidImage;
+    std::vector<Mat> prev_pyramidDepth, curr_pyramidDepth;
+    std::vector<Mat> pyramidCameraMatrix {K, K, K, K};
+    // Mat iterCounts = Mat(Vec4i(7,7,7,10));
+    Mat iterCounts = Mat(Vec<int,1>(10));
+    preparePyramidImage(prevgray, prev_pyramidImage, iterCounts.total());
+    preparePyramidImage(gray, curr_pyramidImage, iterCounts.total());
+    preparePyramidDepth(prev_depth, prev_pyramidDepth, iterCounts.total());
+    preparePyramidDepth(curr_depth, curr_pyramidDepth, iterCounts.total());
+    buildPyramidCameraMatrix(K, (int)prev_pyramidDepth.size(), pyramidCameraMatrix); // iterCounts.size = [1x4] = width*height
+    Mat Rt_baGauss;
+    Sophus::SE3d pose_gn;
+    timestamps.push_back( timestamp_curr );
+    for(int level = iterCounts.size().height - 1; level >= 0; level--){
+        cout << curr_pyramidImage[level].size() << endl;
+    }
+    for(int level = iterCounts.size().height - 1; level >= 0; level--){
+        prevgray = prev_pyramidImage[level];
+        gray = curr_pyramidImage[level];
+        prev_depth = prev_pyramidDepth[level];
+        curr_depth = curr_pyramidDepth[level];
+        K = pyramidCameraMatrix[level];
+        std::vector<KeyPoint> keypoints_prev, keypoints_curr, key_temp1, key_temp2;
         vector<DMatch> matches;
-        Ptr<FeatureDetector> detector = BRISK::create();
-        // detector->detect(image1, key1);
-        // detector->detect(image, key2);
-        detector->detect(prevgray, key1);
-        detector->detect(gray, key2);
-        if(key1.size() == 0 || key2.size() == 0){
-            // find_feature_matches_another(image1, image, keypoints_1, keypoints_2, matches, image2);
-            find_feature_matches(prevgray, gray, keypoints_1, keypoints_2, matches, image2);
-            cout << "第二個: " <<  "一共找到了" << keypoints_1.size() << "组匹配点" << endl;
-            if(keypoints_1.size() == 0 || keypoints_2.size() == 0){
-                keypoints_1.clear();
-                keypoints_2.clear();
-                find_features2(prevgray, gray, keypoints_1, keypoints_2, matches, image2);
-                cout << "第三個: " <<  "一共找到了" << keypoints_1.size() << " " << keypoints_2.size() << " 组匹配点" << endl;
-                // Mat Rt_baGauss = Mat::eye(4,4,CV_64FC1);
-                // Mat& prevRtbaGauss = *Rts_ba.rbegin();
-                // cout << "prevRtBA " << prevRtbaGauss << endl;
-                // cout << "RtBA " << Rt_baGauss << endl; 
-                // Rts_ba.push_back(prevRtbaGauss * Rt_baGauss);
-                // cout << "no matching" << endl;
-                // timestamps.push_back( timestap );
-                // continue;
-            }
-        }
-        else{
-            // find_feature_matches(image1, image, keypoints_1, keypoints_2, matches, image2);
-            find_feature_matches_another(prevgray, gray, keypoints_1, keypoints_2, matches, image2);
-            cout << "第一個: " <<"一共找到了" << matches.size() << "组匹配点" << endl;
-        }
-        vector<Point2f> pt1, pt2;
-        for (auto &kp: keypoints_1) pt1.push_back(kp.pt);
-        vector<uchar> status;
-        vector<float> error;
-        chrono::steady_clock::time_point t3 = chrono::steady_clock::now();
-        // cv::calcOpticalFlowPyrLK(image1, image, pt1, pt2, status, error);
-        cv::calcOpticalFlowPyrLK(prevgray, gray, pt1, pt2, status, error);
-        chrono::steady_clock::time_point t4 = chrono::steady_clock::now();
-        chrono::duration<double> time_used1 = chrono::duration_cast<chrono::duration<double>>(t4 - t3);
-        cout << "optical flow by opencv: " << time_used1.count() << endl;
-        // for(int i=0; i<pt1.size(); i++){
-        //     cout << "pt1 " << pt1[i] << " pt2 " << pt2[i] << endl;
+        int nfeatures=1000;
+        // Ptr<FeatureDetector> detector = ORB::create(nfeatures, 1.2f, 8, 10);
+        Ptr<ORB> detector = ORB::create(nfeatures);
+        detector->setNLevels(nlevels[level]);
+        detector->setEdgeThreshold(edgeThresholds[level]);
+        detector->setPatchSize(patchSizes[level]);
+        detector->detect(prevgray, key_temp1);
+        detector->detect(gray, key_temp2);
+        cv::imwrite("prev.jpg", prevgray);
+        cv::imwrite("curr.jpg", gray);
+        cout << nlevels[level] <<  " " <<  edgeThresholds[level] << " " << patchSizes[level] << " " << key_temp1.size() << " " << key_temp2.size() << " " << prevgray.type() << " " << gray.type() << endl;
+        // if(key_temp1.size() == 0 || key_temp2.size() == 0){
+        //   find_feature_matches_brisk(prevgray, gray, keypoints_prev, keypoints_curr, matches);
+        // //   find_feature_matches_brisk(prevgray, gray, keypoints_prev, keypoints_curr, matches);
+        //   cout << "第二個: " <<  "一共找到了" << keypoints_prev.size() << " " << keypoints_curr.size() << "個關鍵點" << endl;
+        //   cout << "第二個: " << "一共找到了" << matches.size() << "组匹配点" << endl;
+        //   if(keypoints_prev.size() == 0 || keypoints_curr.size() == 0){
+        //     keypoints_prev.clear();
+        //     keypoints_curr.clear();
+        //     find_features_matches_kaze(prevgray, gray, keypoints_prev, keypoints_curr, matches);
+        //     cout << "第三個: " <<  "一共找到了" << keypoints_prev.size() << " " << keypoints_curr.size() << "個關鍵點" << endl;
+        //     cout << "第三個: " << "一共找到了" << matches.size() << "组匹配点" << endl;
+        //   }
         // }
-        
-        cout << "pt1: " << pt1.size() << " pt2: " << pt2.size() << endl;
-        cout << status.size() << endl;
-        cout << error.size() << endl;
-        // First, filter out the points with high error
-        vector<Point2f> right_points_to_find;
-        vector<int> right_points_to_find_back_index;
-        for (unsigned int i=0; i<status.size(); i++) {
-            if (status[i] && error[i] < 20.0) {
-          // cout <<"hey " << status[i] << " start " << error[i] << " end" << endl;
-                // Keep the original index of the point in the optical flow array for future use
-                right_points_to_find_back_index.push_back(i);
-                // Keep the feature point itself
-                right_points_to_find.push_back(pt2[i]);
-            } else {
-                status[i] = 0; // a bad flow
-            }
-        }
-        cout << "right_points_to_find " << right_points_to_find.size() << endl;
-        // for each right_point see which detected feature it belongs to
-        Mat right_points_to_find_flat = Mat(right_points_to_find).reshape(1,right_points_to_find.size()); //flatten array
-        vector<Point2f> right_features; // detected features
-        // KeyPointsToPoints(keypoints_2,right_features);
-        // KeyPoint::convert(keypoints_2,right_features, 1, 1, 0, -1);
-        std::vector<cv::KeyPoint>::iterator it;
-        for( it= keypoints_2.begin(); it!= keypoints_2.end();it++){
-            right_features.push_back(it->pt);
-        }
-        Mat right_features_flat = Mat(right_features).reshape(1,right_features.size());
-        // Look around each OF point in the right image for any features that were detected in its area
-        // and make a match.
-        cout << "right_features " << right_features.size() << endl;
-        BFMatcher matcher(NORM_L2);
-        // Ptr<DescriptorMatcher> matcher = DescriptorMatcher::create("BruteForce-Hamming");
-        vector<vector<DMatch>> nearest_neighbors;
-        // cout << "flat " << right_points_to_find_flat << endl;
-        // cout << "flat " << right_features_flat << endl;
-        if(right_points_to_find.size() > 10){
-              float dis = 2.0f;
-              int tot = 0;
-              int ii = 0;
-              while ((tot < 10 && right_points_to_find.size() > 10) || (tot == 0 && right_points_to_find.size() <= 10 ) ){
-                if(ii > 1){
-                  for(int h=0; h<nearest_neighbors.size(); h++){
-                    nearest_neighbors[h].clear();
-                  }
-                }
-                  matcher.radiusMatch(right_points_to_find_flat, right_features_flat, nearest_neighbors, dis);
-                  tot = 0;
-                  for(int h=0; h<nearest_neighbors.size(); h++){
-                    tot += nearest_neighbors[h].size();
-                  }
-                  dis = dis + 0.5f;
-                  ii += 1;
-              }
-              tot = 0;
-              for(int h=0; h<nearest_neighbors.size(); h++){
-                    tot += nearest_neighbors[h].size();
-              }
-              cout << "total " << tot << endl;
-              // Check that the found neighbors are unique (throw away neighbors
-              // that are too close together, as they may be confusing)
-              std::set<int> found_in_right_points; // for duplicate prevention
-              int ind = 0;
-              while(matches.size() == 0){
-                  
-                double r = 0.5 + ind * 0.05;
-                cout << "first " << matches.size() << " " << ind << " ratio " << r << endl;
-                for(int w=0; w<nearest_neighbors.size(); w++) {
-                    DMatch _m;
-                    // cout << "nearest_neighbors[i] " << nearest_neighbors[i].size() << endl;
-                    if(nearest_neighbors[w].size() == 1) {
-                    _m = nearest_neighbors[w][0]; // only one neighbor
-                    } else if(nearest_neighbors[w].size() > 1) {
-                        // 2 neighbors – check how close they are
-                        double ratio = nearest_neighbors[w][0].distance / nearest_neighbors[w][1].distance;
-                        if(ratio < r) { // not too close //0.38
-                        // take the closest (first) one
-                            _m = nearest_neighbors[w][0];
-                        }else { // too close – we cannot tell which is better
-                            continue; // did not pass ratio test – throw away
-                        }
-                    } else {
-                        continue; // no neighbors
-                    }
-                    // prevent duplicates
-                    if (found_in_right_points.find(_m.trainIdx) == found_in_right_points.end()) {
-                        // The found neighbor was not yet used:
-                        // We should match it with the original indexing
-                        // ofthe left point
-                        _m.queryIdx = right_points_to_find_back_index[_m.queryIdx];
-                        matches.push_back(_m); // add this match
-                        found_in_right_points.insert(_m.trainIdx);
-                    }
-                  
-                }
-                cout << found_in_right_points.size() << endl;
-                cout << "end " << matches.size() << " " << ind << " ratio " << r << endl;
-                if(ind < 20 && matches.size() == 0){
-                      matches.clear();
-                      ind += 1;
-                  }else{
-                    break;
-                  }
-              }
-        
-        }else {
-          // cout << "use matching" << endl;
-          // keypoints_1.clear();
-          // keypoints_2.clear();
-          // matches.clear();
-          // Mat Rt_baGauss = Mat::eye(4,4,CV_64FC1);
-          // Mat& prevRtbaGauss = *Rts_ba.rbegin();
-          // cout << "prevRtBA " << prevRtbaGauss << endl;
-          // cout << "RtBA " << Rt_baGauss << endl; 
-          // Rts_ba.push_back(prevRtbaGauss * Rt_baGauss);
-          // cout << "no matching 2" << endl;
-          // timestamps.push_back( timestap );
-          // continue;
-          find_features2(prevgray, gray, keypoints_1, keypoints_2, matches, image);
+        // else{
+          cout << matches.size() << endl;
+          keypoints_prev.clear();
+          keypoints_curr.clear();
+          find_feature_matches_orb(prevgray, gray, keypoints_prev, keypoints_curr, matches, level);
+        //   find_feature_matches_brisk(prevgray, gray, keypoints_prev, keypoints_curr, matches);
+          cout << "第一個: " <<  "一共找到了" << keypoints_prev.size() << " " << keypoints_curr.size() << "個關鍵點" << endl;
+          cout << "第一個: " << "一共找到了" << matches.size() << "组匹配点" << endl;
+        // }
 
-        }
-       if(matches.size() == 0){
-         Mat Rt_baGauss = Mat::eye(4,4,CV_64FC1);
-          Mat& prevRtbaGauss = *Rts_ba.rbegin();
-          cout << "prevRtBA " << prevRtbaGauss << endl;
-          cout << "RtBA " << Rt_baGauss << endl; 
-          Rts_ba.push_back(prevRtbaGauss * Rt_baGauss);
-          cout << "no matching 3" << endl;
-          timestamps.push_back( timestap );
-          continue;
-       }
-        cout<< "pruned " << matches.size() << " / " << nearest_neighbors.size() << " matches" << endl;
+        Mat img_matches;
+        drawMatches( prevgray, keypoints_prev, gray, keypoints_curr, matches, img_matches, Scalar::all(-1),
+                    Scalar::all(-1), std::vector<char>(), DrawMatchesFlags::NOT_DRAW_SINGLE_POINTS );
+        //-- Show detected matches
         
+        // curr_file.erase(remove(curr_file.begin(), curr_file.end(), '/'), curr_file.end());
+        // string result_file = "../result/" + curr_file;
+        // imwrite(result_file, img_matches);
         // 建立3D点
         // Mat d1 = imread(depth1, IMREAD_UNCHANGED);       // 深度图为16位无符号数，单通道图像
-        Mat K = (Mat_<double>(3, 3) << 517.3f, 0, 318.6f, 0, 516.5f, 255.3f, 0, 0, 1);
+        
+        
+        const int minNumberMatchesAllowed = 8;
+        std::vector<cv::DMatch> match_inliers;
+        ransac_matching(match_inliers, matches, minNumberMatchesAllowed, keypoints_prev, keypoints_curr);
+        
+        vector<KeyPoint> keys1, keys2;
         vector<Point3f> pts_3d;
         vector<Point2f> pts_2d;
         vector<Point3f> pts_3d_nxt;
-        int index = 1;
-        std::vector<KeyPoint> keys1, keys2;
-        std::vector<cv::Point2f> points1, points2;
-        // cout << "depth1" << 
-        for (DMatch m:matches) {
-                ushort d = depth1.ptr<unsigned short>(int(keypoints_1[m.queryIdx].pt.y))[int(keypoints_1[m.queryIdx].pt.x)];
-                ushort d_nxt = depth.ptr<unsigned short>(int(keypoints_2[m.trainIdx].pt.y))[int(keypoints_2[m.trainIdx].pt.x)];
-                // cout << "depth " << d << endl;
-                if (d == 0 || d_nxt == 0 || isnan(d) || isnan(d_nxt)){
-                    continue;
-                }
-                // cout << "this is matches: " <<  index << endl;
-                float dd = d / 5000.0;
-                float dd_nxt = d_nxt / 5000.0;
-                Point2d p1 = pixel2cam(keypoints_1[m.queryIdx].pt, K);
-                Point2d p2 = pixel2cam(keypoints_2[m.trainIdx].pt, K);
-                // cout << "p1.x " << p1.x << " p1.y " << p1.y << endl;
-                keys1.push_back(keypoints_1[m.queryIdx]);
-                keys2.push_back(keypoints_2[m.trainIdx]);
-                points1.push_back(keypoints_1[m.queryIdx].pt);
-                points2.push_back(keypoints_2[m.trainIdx].pt);
-                // cout << dd << " keypoints_1[m.queryIdx].pt " << keypoints_1[m.queryIdx].pt << " keypoints_2[m.trainIdx].pt " << keypoints_2[m.trainIdx].pt << endl;
-                pts_3d.push_back(Point3f(p1.x * dd, p1.y * dd, dd));
-                pts_3d_nxt.push_back(Point3f(p2.x * dd_nxt, p2.y * dd_nxt, dd_nxt));
-                pts_2d.push_back(keypoints_2[m.trainIdx].pt);
-                index += 1;
-            // }
-        }
+        
+        vector<Point2f> points1, points2;
+        match_points(pts_3d, pts_2d, pts_3d_nxt, keys1, keys2, keypoints_prev, keypoints_curr, points1, points2, match_inliers, prev_depth, curr_depth, K);
+
         cout << "3d-2d pairs: " << pts_3d.size() << " " << pts_2d.size() << endl;
-        // exit(1);
-        if(pts_3d.size() == 0){
-         Mat Rt_baGauss = Mat::eye(4,4,CV_64FC1);
-          Mat& prevRtbaGauss = *Rts_ba.rbegin();
-          cout << "prevRtBA " << prevRtbaGauss << endl;
-          cout << "RtBA " << Rt_baGauss << endl; 
-          Rts_ba.push_back(prevRtbaGauss * Rt_baGauss);
-          cout << "no matching 4" << endl;
-          timestamps.push_back( timestap );
-          continue;
-       }
+        // solvePnPRansac(pts_3d, pts_2d, K, Mat(), r, t, false, 1000, 6.0, 0.99, inliers, SOLVEPNP_ITERATIVE);
+        
         VecVector3d pts_3d_eigen;
-      VecVector2d pts_2d_eigen;
-      VecVector3d pts_3d_eigen_nxt;
+        VecVector2d pts_2d_eigen;
+        VecVector3d pts_3d_eigen_nxt;
         for (size_t i = 0; i < pts_3d.size(); ++i) {
-         // cout << "vector3d " << Eigen::Vector3d(pts_3d[i].x, pts_3d[i].y, pts_3d[i].z) << "vector2d " << Eigen::Vector2d(pts_2d[i].x, pts_2d[i].y) << endl;
-         pts_3d_eigen.push_back(Eigen::Vector3d(pts_3d[i].x, pts_3d[i].y, pts_3d[i].z));
-         pts_3d_eigen_nxt.push_back(Eigen::Vector3d(pts_3d_nxt[i].x, pts_3d_nxt[i].y, pts_3d_nxt[i].z));
-         pts_2d_eigen.push_back(Eigen::Vector2d(pts_2d[i].x, pts_2d[i].y));
-      }
-        bool b = false;
-        // if(pts_3d.size() == 3) {b = true;}
+          // cout << "vector3d " << Eigen::Vector3d(pts_3d[i].x, pts_3d[i].y, pts_3d[i].z) << "vector2d " << Eigen::Vector2d(pts_2d[i].x, pts_2d[i].y) << endl;
+          pts_3d_eigen.push_back(Eigen::Vector3d(pts_3d[i].x, pts_3d[i].y, pts_3d[i].z));
+          pts_3d_eigen_nxt.push_back(Eigen::Vector3d(pts_3d_nxt[i].x, pts_3d_nxt[i].y, pts_3d_nxt[i].z));
+          pts_2d_eigen.push_back(Eigen::Vector2d(pts_2d[i].x, pts_2d[i].y));
+        }
+
+        // img_matches = curr_img;
+        // for(int l=0; l<pts_2d_eigen.size(); l++){
+        //     cv::Point centerCircle(pts_2d_eigen[l][1], pts_2d_eigen[l][0]);
+        //     cout << pts_2d_eigen[l][1] << " " << pts_2d_eigen[l][0] << endl;
+        //     cv::Scalar colorCircle(0, 0, 255);
+        //     cv::circle(img_matches, centerCircle, 2, colorCircle, cv::FILLED);
+        // }
+        // curr_file.erase(remove(curr_file.begin(), curr_file.end(), '/'), curr_file.end());
+        // string result_file = "../result/" + curr_file;
+        // imwrite(result_file, img_matches);
+
+        keypoints_prev.clear();
+        keypoints_prev = keys1;
+        keypoints_curr.clear();
+        keypoints_curr = keys2;
+        // visualize_flow(prevgray, gray, points1, points2, key2, i);
+
+        Mat r, t, inliers;
         
-        keypoints_1.clear();
-        keypoints_1 = keys1;
-        keypoints_2.clear();
-        keypoints_2 = keys2;
+        // for (int i=0; i<inliers.rows; i++){
+          //  cout << "inliers " << i << " -> keypoints_prev: " << keypoints_prev[inliers.at<int>(i,0)].pt << " keypoints_curr: " << keypoints_curr[inliers.at<int>(i,0)].pt << endl;
+        // }
+        // cout<< "inliers point num = " << inliers.rows <<endl;
         
-        // std::vector<cv::KeyPoint>::iterator it1, it2;
-        // for( it1= keys1.begin(); it1!= keys1.end();it1++)
-        // {
-            
-        // }
-        // for( it2= keys2.begin(); it2!= keys2.end();it2++)
-        // {
-            
-        // }
-        // for (int i=0; i<; i++){
-        //  cout << "inliers -> keypoints_1: " << keypoints_1[inliers.at<int>(i,0)].pt << " keypoints_2: " << keypoints_2[inliers.at<int>(i,0)].pt << endl;
-        // }
-        // for (int j=0; j<points1.size(); j++){
-        //  cout << "pts1 " << points1[j] << " pts2: " << points2[j] << endl;
-        // }
-        // vector<Scalar> colors;
-        // RNG rng;
-        // for(int j = 0; j < 100; j++){
-        //     int r = rng.uniform(0, 256);
-        //     int g = rng.uniform(0, 256);
-        //     int b = rng.uniform(0, 256);
-        //     colors.push_back(Scalar(r,g,b));
-        // }
-        // for(int j=0; j<keys2.size(); j++){
-        //     circle(image1, points1[j], 5, colors[j], -1);
-        //     circle(image, points2[j], 5, colors[j], -1);
-        // }
-        // if(i == 1){
-        //     imwrite("0.jpg", image1);
-        //     imwrite("1.jpg", image);
-        // }
-        // // vector<Point2f> p_old, p_new;
-        // // cv::goodFeaturesToTrack(image1, p_old, 100, 0.3, 7, Mat(), 7, false, 0.04);
-        // // // Calculate optical flow
-        // vector<uchar> status;
-        // vector<float> err;
-        // Mat mask = Mat::zeros(image1.size(), image1.type());
-        // cv::TermCriteria criteria = TermCriteria((TermCriteria::COUNT) + (TermCriteria::EPS), 10, 0.03);
-        // cv::calcOpticalFlowPyrLK(image, image1, pts_2d_old, pts_2d, status, err, Size(15,15), 2, criteria);
-        // vector<Point2f> good_new;
-        // // Visualization part
-        // for(uint i = 0; i < pts_2d_old.size(); i++){
-        //     // Select good points
-        //     if(status[i] == 1) {
-        //         good_new.push_back(pts_2d[i]);
-        //         // Draw the tracks
-        //         line(mask,pts_2d[i], pts_2d_old[i], colors[i], 2);
-        //         circle(image, pts_2d[i], 5, colors[i], -1);
-        //     }
-        // }
-        // // Display the demo
-        // Mat img;
-        // cv::add(image, mask, img);
-        // // if (save) {
-        // //     string save_path = "./optical_flow_frames/frame_" + to_string(counter) + ".jpg";
-        // //     imwrite(save_path, img);
-        // // }
-        // cv::imshow("flow", img);
-        // // int keyboard = cv::waitKey(25);
-        // // if (keyboard == 'q' || keyboard == 27)
-        // //     break;
-        // // Update the previous frame and previous points
-        // image1 = image.clone();
-        // pts_2d_old = good_new;
+        // pnp_append_rt(r, t, Rts, inliers, keypoints_prev,keypoints_curr,pts_3d)
+        Mat Rt_ba;
+        // cout << "3d-2d pairs: " << pts_3d.size() << " " << pts_2d.size() << endl;
 
-    // 
-      // chrono::steady_clock::time_point t1 = chrono::steady_clock::now();
-      Mat r, t, inliers;
-      // cout << "3d-2d pairs: " << pts_3d.size() << " " << pts_2d.size() << endl;
-      // solvePnPRansac(pts_3d, pts_2d, K, Mat(), r, t, b, 1000, 6.0, 0.99, inliers, SOLVEPNP_ITERATIVE);
-    //   cout << "inliers: " << inliers << endl;
-      for (int i=0; i<inliers.rows; i++){
-        //  cout << "inliers " << i << " -> keypoints_1: " << keypoints_1[inliers.at<int>(i,0)].pt << " keypoints_2: " << keypoints_2[inliers.at<int>(i,0)].pt << endl;
-      }
-      // cout << "inliers "<< inliers << endl;
-      cout<<"pnp OK = "<< b <<", inliers point num = "<<inliers.rows<<endl;
-      // Mat R;
-      // cv::Rodrigues(r, R); // r为旋转向量形式，用Rodrigues公式转换为矩阵
-      // chrono::steady_clock::time_point t2 = chrono::steady_clock::now();
-      // chrono::duration<double> time_used = chrono::duration_cast<chrono::duration<double>>(t2 - t1);
-      // cout << "solve pnp in opencv cost time: " << time_used.count() << " seconds." << endl;
+        // BAg2o(pts_3d_eigen, pts_2d_eigen, K, argv[2], timestamps, Rts_ba, Rt_ba, pts_3d_eigen, pts_2d_eigen)
 
-      // cout << "R=" << endl << R << endl;
-      // cout << "t=" << endl << t << endl;
-      timestamps.push_back( timestap );
-      // Mat output;
-      // hconcat(R, t, output);
-   
-      // Mat Rt = Mat::eye(4,4,CV_64FC1);
-      // Rt.at<double>(0,0) = R.at<double>(0,0);
-      // Rt.at<double>(0,1) = R.at<double>(0,1);
-      // Rt.at<double>(0,2) = R.at<double>(0,2);
-      // Rt.at<double>(1,0) = R.at<double>(1,0);
-      // Rt.at<double>(1,1) = R.at<double>(1,1);
-      // Rt.at<double>(1,2) = R.at<double>(1,2);
-      // Rt.at<double>(2,0) = R.at<double>(2,0);
-      // Rt.at<double>(2,1) = R.at<double>(2,1);
-      // Rt.at<double>(2,2) = R.at<double>(2,2);
-      // Rt.at<double>(0,3) = t.at<double>(0,0);
-      // Rt.at<double>(1,3) = t.at<double>(0,1);
-      // Rt.at<double>(2,3) = t.at<double>(0,2);
-      // cout << "Rt " << Rt << endl; 
-      // Mat& prevRt = *Rts.rbegin();
-      // cout << "prevRt " << prevRt << endl;
-      // cout << "Rt " << Rt << endl; 
-    //   for (int i=0; i<inliers.rows; i++){
-    //      Mat m( 4,1, CV_64FC1);
-    //      m.at<double>(0,0) = keypoints_1[inliers.at<int>(i,0)].pt.x;
-    //      m.at<double>(1,0) = keypoints_1[inliers.at<int>(i,0)].pt.y;
-    //      m.at<double>(2,0) = pts_3d[i].z;
-    //      m.at<double>(3,0) = 1;
-    //      cout << "original " << m.t() << " projected " << (prevRt * Rt * m).t() << "  " << "actual " << keypoints_2[inliers.at<int>(i,0)].pt<< endl;
-    //   }
-      // Rts.push_back(prevRt * Rt);
-      
+        // let's randomly pick pixels in the first image and generate some 3d points in the first image's frame
+        cv::RNG rng;
+        int nPoints = 2000;
+        int border = 20;
+        VecVector3d pixels_ref;
+        VecVector2d pixels_ref_2d;
+        const vector<float> depth_ref;
+        // directPoseEstimation(rng, nPoints, prevgray, gray, pixels_ref, depth_ref, prev_depth, border)
+        // generate pixels in ref and load depth data
+        // for (int i = 0; i < nPoints; i++) {
+        //   int x = rng.uniform(border, prevgray.cols - border);  // don't pick pixels close to border
+        //   int y = rng.uniform(border, prevgray.rows - border);  // don't pick pixels close to border
+        //   ushort d = prev_depth.ptr<unsigned short>(y)[x];
+        //   pixels_ref.push_back(Eigen::Vector3d(x, y,d));
+        //   pixels_ref_2d.push_back(Eigen::Vector2d(x, y));
+        // }
+        // cv::GaussianBlur( src, src, Size(3,3), 0, 0, BORDER_DEFAULT );
+        VecVector3d pts_3d_eigen_new;
+        VecVector2d pts_2d_eigen_new;
+        VecVector3d pts_3d_eigen_nxt_new;
+        Mat grad_x, grad_y;
+        match_dir_points(pts_3d_eigen_new, pts_2d_eigen_new, pts_3d_eigen_nxt_new, prevgray, gray, prev_depth, curr_depth, K, grad_x, grad_y);
+        cout << "dir 3d-2d pairs: " << pts_2d_eigen_new.size() << endl;
+        
+        int radiusCircle = 2;
+        img_matches = curr_img;
+        for(int l=0; l<pts_2d_eigen_new.size(); l++){
+            cv::Point centerCircle(pts_2d_eigen_new[l][0], pts_2d_eigen_new[l][1]);
+            // cout << pts_2d_eigen_new[l][1] << " " << pts_2d_eigen_new[l][0] << endl;
+            cv::Scalar colorCircle(0, 0, 255);
+            cv::circle(img_matches, centerCircle, radiusCircle, colorCircle, cv::FILLED);
 
-      Mat Rt_ba;
-      
-      cout << "3d-2d pairs: " << pts_3d.size() << " " << pts_2d.size() << endl;
-      // for (size_t i = 0; i < pts_3d.size(); ++i) {
-      //    // cout << "vector3d " << Eigen::Vector3d(pts_3d[i].x, pts_3d[i].y, pts_3d[i].z) << "vector2d " << Eigen::Vector2d(pts_2d[i].x, pts_2d[i].y) << endl;
-      //    pts_3d_eigen.push_back(Eigen::Vector3d(pts_3d[i].x, pts_3d[i].y, pts_3d[i].z));
-      //    pts_2d_eigen.push_back(Eigen::Vector2d(pts_2d[i].x, pts_2d[i].y));
-      // }
-      // for (size_t i = 0; i < pts_3d.size(); ++i) {
-      //    for (size_t j = 0; j < 3; ++j) {
-      //       cout << " eigen3d " << pts_3d_eigen[i][j] << cout << " eigen2d "  <<*pts_2d_eigen[i][j];
-      //    }
-      // }
-      // cout << "calling bundle adjustment by g2o" << endl;
-      // Sophus::SE3d pose_g2o;
-      // t1 = chrono::steady_clock::now();
-      // Rt_ba = bundleAdjustmentG2O(pts_3d_eigen, pts_2d_eigen, K, pose_g2o, argv[2], timestamps);
-      // Mat& prevRtba = *Rts_ba.rbegin();
-      // Rts_ba.push_back(prevRtba * Rt_ba);
-      // t2 = chrono::steady_clock::now();
-      // time_used = chrono::duration_cast<chrono::duration<double>>(t2 - t1);
-      // cout << "solve pnp by g2o cost time: " << time_used.count() << " seconds." << endl;
-    //  cout << "calling bundle adjustment by gauss newton" << endl;
-    // let's randomly pick pixels in the first image and generate some 3d points in the first image's frame
-    cv::RNG rng;
-    int nPoints = 2000;
-    int boarder = 20;
-    VecVector3d pixels_ref;
-    VecVector2d pixels_ref_2d;
-    vector<float> depth_ref;
-    // double baseline = 0.573;
-    // generate pixels in ref and load depth data
-    // for (int i = 0; i < nPoints; i++) {
-    //     int x = rng.uniform(boarder, prevgray.cols - boarder);  // don't pick pixels close to boarder
-    //     int y = rng.uniform(boarder, prevgray.rows - boarder);  // don't pick pixels close to boarder
-    //     // int disparity = depth1.at<uchar>(y, x);
-    //     // double depth = fx * baseline / disparity; // you know this is disparity to depth
-    //     // double d = depth1.ptr<double>(y)[x];
-    //     float d1 = depth1.at<float>(y,x)/5000.0;
-    //     float d = depth1.ptr<float>(y)[x]/5000.0;
-    //     if(d1 == 0 || isnan(d1)){
-    //       continue;
-    //     }
-    //     depth_ref.push_back(d1);
-    //     pixels_ref.push_back(Eigen::Vector2d(x, y));
-    // }
-
-    // Sophus::SE3d T_cur_ref;
-    // Mat Rt_baGauss = DirectPoseEstimationSingleLayer(gray, prevgray, pixels_ref, depth_ref, T_cur_ref);
-    // Mat Rt_baGauss = DirectPoseEstimationMultiLayer(prevgray, gray, pixels_ref, depth_ref, T_cur_ref);
-    
-    // generate pixels in ref and load depth data
-    for (int i = 0; i < nPoints; i++) {
-        int x = rng.uniform(boarder, prevgray.cols - boarder);  // don't pick pixels close to boarder
-        int y = rng.uniform(boarder, prevgray.rows - boarder);  // don't pick pixels close to boarder
-        ushort d = depth1.ptr<unsigned short>(y)[x];
-        pixels_ref.push_back(Eigen::Vector3d(x, y,d));
-        pixels_ref_2d.push_back(Eigen::Vector2d(x, y));
+        }
+        curr_file.erase(remove(curr_file.begin(), curr_file.end(), '/'), curr_file.end());
+        string result_file = "../result/" + curr_file;
+        imwrite(result_file, img_matches);
+        
+        int mode = 0; // 0=huber
+        Rt_baGauss = bundleAdjustmentGaussNewtonPnP(pts_3d_eigen, pts_2d_eigen, K, pose_gn, mode);
+        // Rt_baGauss = bundleAdjustmentGaussNewtonICP(pts_3d_eigen, pts_2d_eigen, pts_3d_eigen_nxt, K, pose_gn, mode);
+        // Rt_baGauss = bundleAdjustmentGaussNewtonDir(pts_3d_eigen, pts_2d_eigen, pts_3d_eigen_nxt, K, pose_gn, mode, prevgray, gray);
+        // Rt_baGauss = bundleAdjustmentGaussNewtonDir(pts_3d_eigen_new, pts_2d_eigen_new, pts_3d_eigen_nxt, K, pose_gn, mode, prevgray, gray, grad_x, grad_y);
+        // Rt_baGauss = bundleAdjustmentGaussNewton(pts_3d_eigen, pts_2d_eigen, pts_3d_eigen_nxt, K, pose_gn, mode, prev_img, curr_img);
     }
-     Sophus::SE3d pose_gn;
-    //  t1 = chrono::steady_clock::now();
-     int mode = 0; // 0=huber
-    //  Mat Rt_baGauss = bundleAdjustmentGaussNewtonPnP(pts_3d_eigen, pts_2d_eigen, K, pose_gn, mode);
-    //  Mat Rt_baGauss = bundleAdjustmentGaussNewtonICP(pts_3d_eigen, pts_2d_eigen, pts_3d_eigen_nxt, K, pose_gn, mode);
-    // Mat Rt_baGauss = bundleAdjustmentGaussNewtonDir(pts_3d_eigen, pts_2d_eigen, pts_3d_eigen_nxt, K, pose_gn, mode, prevgray, gray);
-    //  Mat Rt_baGauss = bundleAdjustmentGaussNewtonDir(pixels_ref, pixels_ref_2d, pts_3d_eigen_nxt, K, pose_gn, mode, prevgray, gray);
-     Mat Rt_baGauss = bundleAdjustmentGaussNewton(pts_3d_eigen, pts_2d_eigen, pts_3d_eigen_nxt, K, pose_gn, mode, image1, image);
-      Mat& prevRtbaGauss = *Rts_ba.rbegin();
-      cout << "prevRtBA " << prevRtbaGauss << endl;
-      cout << "RtBA " << Rt_baGauss << endl; 
-      
-    //  t2 = chrono::steady_clock::now();
-    //  time_used = chrono::duration_cast<chrono::duration<double>>(t2 - t1);
-    //  cout << "solve pnp by gauss newton cost time: " << time_used.count() << " seconds." << endl;
-     for (int i=0; i<inliers.rows; i++){
-         Mat m( 4,1, CV_64FC1);
-         m.at<double>(0,0) = keypoints_1[inliers.at<int>(i,0)].pt.x;
-         m.at<double>(1,0) = keypoints_1[inliers.at<int>(i,0)].pt.y;
-         m.at<double>(2,0) = pts_3d[i].z;
-         m.at<double>(3,0) = 1;
-        //  cout << "original " << m.t() << " projected " << (prevRtbaGauss * Rt_baGauss * m).t() << "  " << "actual " << keypoints_2[inliers.at<int>(i,0)].pt<< endl;
-      }
-      Rts_ba.push_back(prevRtbaGauss * Rt_baGauss);
-   }
-//    writeResults(argv[2], timestamps, Rts);
-   writeResults(argv[2], timestamps, Rts_ba);
+    Mat& prevRtbaGauss = *Rts_ba.rbegin();
+    cout << "prevRtBA " << prevRtbaGauss << endl;
+    cout << "RtBA " << Rt_baGauss << endl; 
+    
+    // for (int i=0; i<inliers.rows; i++){
+    //   Mat m( 4,1, CV_64FC1);
+    //   m.at<double>(0,0) = pts_3d[i].x;
+    //   m.at<double>(1,0) = pts_3d[i].y;
+    //   m.at<double>(2,0) = pts_3d[i].z;
+    //   m.at<double>(3,0) = 1;
+    //  cout << "original " << m.t() << " projected " << (prevRtbaGauss * Rt_baGauss * m).t() << "  " << "actual " << keypoints_curr[inliers.at<int>(i,0)].pt<< endl;
+    // }
+    Rts_ba.push_back(prevRtbaGauss * Rt_baGauss);
+    cout << "RtBA final " << *Rts_ba.rbegin() << endl; 
+  }
+  // writeResults(argv[2], timestamps, Rts);
+  writeResults(argv[2], timestamps, Rts_ba);
    
   return 0;
 }
+double calc_residual_dir(
+   const VecVector3d &points_3d,
+  const VecVector2d &points_2d,
+  const VecVector3d &points_3d_nxt,
+  Sophus::SE3d &pose,
+  const Mat &K,
+  vector<double>& residuals,
+  const Mat &img1,
+  const Mat &img2
+){
+   double fx = K.at<double>(0, 0);
+  double fy = K.at<double>(1, 1);
+  double cx = K.at<double>(0, 2);
+  double cy = K.at<double>(1, 2);
+  const int half_patch_size = 0;
+  vector<double> res_std;
+  cout << "in residual size " << points_3d.size() << endl;
+  Mat Rt = Mat::eye(4,4,CV_64FC1);
+  Rt.at<double>(0,0) = pose.matrix()(0);
+  Rt.at<double>(1,0) = pose.matrix()(1);
+  Rt.at<double>(2,0) = pose.matrix()(2);
+  Rt.at<double>(3,0) = pose.matrix()(3);
+  Rt.at<double>(0,1) = pose.matrix()(4);
+  Rt.at<double>(1,1) = pose.matrix()(5);
+  Rt.at<double>(2,1) = pose.matrix()(6);
+  Rt.at<double>(3,1) = pose.matrix()(7);
+  Rt.at<double>(0,2) = pose.matrix()(8);
+  Rt.at<double>(1,2) = pose.matrix()(9);
+  Rt.at<double>(2,2) = pose.matrix()(10);
+  Rt.at<double>(3,2) = pose.matrix()(11);
+  Rt.at<double>(0,3) = pose.matrix()(12);
+  Rt.at<double>(1,3) = pose.matrix()(13);
+  Rt.at<double>(2,3) = pose.matrix()(14);
+  Rt.at<double>(3,3) = pose.matrix()(15);
+  cout << "residual pose " << Rt << endl;
+  int patch = (2*half_patch_size+1)*(2*half_patch_size+1)-1;
+  if(patch == 0) 
+    patch = 1;
+  for (int i=0; i<points_3d.size(); i++){
+     Eigen::Vector3d pc = pose * points_3d[i];
+     Eigen::Vector2d proj(fx * pc[0] / pc[2] + cx, fy * pc[1] / pc[2] + cy);
+    //  Eigen::Vector2d error_pnp = points_2d[i] - proj;
+    //  Eigen::Vector3d error = points_3d_nxt[i] - pc;
+
+    double error = 0;
+    Eigen::Vector2d orig(fx * points_3d[i][0] / points_3d[i][2] + cx, fy * points_3d[i][1] / points_3d[i][2] + cy);
+    // cout << "(" << proj[0] << "," << proj[1] << ") ("  << orig[0] << "," << orig[1] << ")" << endl;
+     for (int x = -half_patch_size; x <= half_patch_size; x++){
+        for (int y = -half_patch_size; y <= half_patch_size; y++) {
+            double error_direct = GetPixelValue(img2, proj[0] + x, proj[1] + y) - GetPixelValue(img1, orig[0] + x, orig[1] + y);
+            // cout << "error_direct " << error_direct << endl;
+            // cout << "      " << GetPixelValue(img2, proj[0] + x, proj[1] + y) << " " << GetPixelValue(img1, orig[0] + x, orig[1] + y) << endl;
+            error += error_direct*error_direct;
+        }
+    }
+    // cout << "error in residual " << error/9 << endl;
+     residuals.push_back(error/patch);
+     if (proj[0] > half_patch_size && proj[0] < img2.cols - half_patch_size && proj[1] > half_patch_size &&
+            proj[1] < img2.rows - half_patch_size && isnan(pc[2]) == false) {
+         res_std.push_back(error/patch);
+      }
+  }
+  // for(int i=0; i<residuals.size(); i++){
+  //   cout << "residual " << residuals[i] << endl;
+  // }
+  double total = 0;
+  for(int i=0; i<residuals.size(); i++){
+      total += residuals[i];
+  }
+    cout << "total residual square " << total << endl;
+  double avg = Average(res_std); 
+  double std = Deviation(res_std,avg);
+  cout << "average " << avg << endl;
+  return std;
+}
+Mat bundleAdjustmentGaussNewtonDir(
+  const VecVector3d &points_3d,
+  const VecVector2d &points_2d,
+  const VecVector3d &points_3d_nxt,
+  const Mat &K,
+  Sophus::SE3d &pose,
+  int mode,
+  const cv::Mat &img1,
+  const cv::Mat &img2,
+  const Mat &grad_x, 
+  const Mat &grad_y 
+  ) {
+
+  typedef Eigen::Matrix<double, 6, 1> Vector6d;
+  const int iterations = 10;
+  double cost = 0, lastCost = 0;
+  double fx = K.at<double>(0, 0);
+  double fy = K.at<double>(1, 1);
+  double cx = K.at<double>(0, 2);
+  double cy = K.at<double>(1, 2);
+  vector<double> residuals;
+  double res_std = calc_residual_dir(points_3d, points_2d, points_3d_nxt, pose, K, residuals, img1, img2);
+  // for(int i=0; i < residuals.size(); i++) {
+  //    cout << residuals.at(i) << endl;
+  // }
+  cout << "deviation: " << res_std << endl;
+  double huber_k = 1.345 * res_std;
+  vector<double> weight_dir;
+  if(mode == 0){
+      for (int j=0; j<residuals.size(); j++){
+          if(residuals[j] <= huber_k){
+              weight_dir.push_back(1.0);
+          }else {
+              weight_dir.push_back(huber_k/residuals[j]);
+          }
+      }
+  }else {
+      for (int j=0; j<residuals.size(); j++){
+          weight_dir.push_back(0.0);
+      }
+  }
+
+  for (int iter = 0; iter < iterations; iter++) {
+    Eigen::Matrix<double, 6, 6> H = Eigen::Matrix<double, 6, 6>::Zero();
+    Vector6d b = Vector6d::Zero();
+    Eigen::Matrix<double, 6, 6> H_dir = Eigen::Matrix<double, 6, 6>::Zero();
+    Vector6d b_dir = Vector6d::Zero();
+    const int half_patch_size = 0;
+    int patch = (2*half_patch_size+1)*(2*half_patch_size+1)-1;
+    if(patch == 0) 
+      patch = 1;
+    int cnt_good = 0;
+    double cost_dir = 0;
+    cost = 0;
+    // compute cost
+    for (int i = 0; i < points_3d.size(); i++) {
+      Eigen::Vector2d orig(fx * points_3d[i][0] / points_3d[i][2] + cx, fy * points_3d[i][1] / points_3d[i][2] + cy);
+      Eigen::Vector3d pc = pose * points_3d[i];
+      Eigen::Vector2d proj(fx * pc[0] / pc[2] + cx, fy * pc[1] / pc[2] + cy);
+      cout << points_3d[i][0] << "," << points_3d[i][1] << "," << points_3d[i][2] << endl;
+      // cout << proj[0] << "," << proj[1] << " " << pc[0] << "," << pc[1] << "," << pc[2] << " " << points_3d[i][0] << "," << points_3d[i][1] << "," << points_3d[i][2] << endl;
+      // Eigen::Vector2d error_pnp = points_2d[i] - proj;
+      // Eigen::Vector3d e = pc - points_3d_nxt[i];
+      // double inv_z = 1.0 / pc[2];
+      // double inv_z2 = inv_z * inv_z;
+      if (proj[0] < half_patch_size || proj[0] > img2.cols - half_patch_size || proj[1] < half_patch_size || proj[1] > img2.rows - half_patch_size || isnan(pc[2])){
+        continue;
+      }
+      // "[" << points_3d[i][0] << ", " << points_3d[i][1] << "]" <<"[" << pc[0] << ", " << pc[1] << "]" <<  
+      cnt_good = cnt_good + 1;
+      // cout << "[" << points_2d[i][0] << ", " << points_2d[i][1] << "]" << " [" << proj[0] << ", " << proj[1] << "]" << endl;
+      double error_dir_loop = 0;
+      double X = pc[0], Y = pc[1], Z = pc[2], Z2 = Z * Z, Z_inv = 1.0 / Z, Z2_inv = Z_inv * Z_inv;
+      for (int x = -half_patch_size; x <= half_patch_size; x++){
+          for (int y = -half_patch_size; y <= half_patch_size; y++) {
+              double error_dir_single = GetPixelValue(img1, orig[0] + x, orig[1] + y) -
+                          GetPixelValue(img2, proj[0] + x, proj[1] + y);
+              // double error_dir_single = GetPixelValue(img2, proj[0] + x, proj[1] + y) - GetPixelValue(img1, orig[0] + x, orig[1] + y);
+              error_dir_loop += error_dir_single * error_dir_single;
+
+              Eigen::Matrix<double, 2, 6> J_pixel_xi;
+              Eigen::Vector2d J_img_pixel;
+              J_pixel_xi(0, 0) = fx * Z_inv;
+              J_pixel_xi(0, 1) = 0;
+              J_pixel_xi(0, 2) = -fx * X * Z2_inv;
+              J_pixel_xi(0, 3) = -fx * X * Y * Z2_inv;
+              J_pixel_xi(0, 4) = fx + fx * X * X * Z2_inv;
+              J_pixel_xi(0, 5) = -fx * Y * Z_inv;
+
+              J_pixel_xi(1, 0) = 0;
+              J_pixel_xi(1, 1) = fy * Z_inv;
+              J_pixel_xi(1, 2) = -fy * Y * Z2_inv;
+              J_pixel_xi(1, 3) = -fy - fy * Y * Y * Z2_inv;
+              J_pixel_xi(1, 4) = fy * X * Y * Z2_inv;
+              J_pixel_xi(1, 5) = fy * X * Z_inv;
+
+              // J_img_pixel = Eigen::Vector2d(
+              //     0.5 * (GetPixelValue(img2, proj[0] + 1 + x, proj[1] + y) - GetPixelValue(img2, proj[0] - 1 + x, proj[1] + y)),
+              //     0.5 * (GetPixelValue(img2, proj[0] + x, proj[1] + 1 + y) - GetPixelValue(img2, proj[0] + x, proj[1] - 1 + y))
+              // );
+              J_img_pixel = Eigen::Vector2d(
+                  grad_x.at<short int>(orig[1], orig[0]),
+                  grad_y.at<short int>(orig[1], orig[0])
+              );
+              // cout << grad_x.at<short int>(orig[1], orig[0]) << " " << grad_y.at<short int>(orig[1], orig[0]) << endl;
+              // cout << grad_x.at<short int>(orig[1],orig[0]) << "," << grad_y.at<short int>(orig[1],orig[0]) << endl;
+              // total jacobian
+              Vector6d J_dir = -1.0 * (J_img_pixel.transpose() * J_pixel_xi).transpose();
+              // cout << "J_dir " << J_dir << endl; 
+              // H_dir += J_dir * J_dir.transpose() * weight_dir[i];
+              // b_dir += -error_dir_single * J_dir * weight_dir[i];
+              H_dir += J_dir * J_dir.transpose();
+              b_dir += -error_dir_single * J_dir;
+              // b_dir += J_dir;
+              // cout << "H_dir " << H_dir << endl;
+              // cout << grad_x.at<short int>(orig[1], orig[0]) << " " << fx << " " << Z_inv << endl;
+              // cout << grad_x.at<short int>(orig[1], orig[0]) * fx * Z_inv << " " << fx * Z_inv << endl;
+              // cout << J_img_pixel << endl;
+              // cout << J_pixel_xi << endl;
+              // cout << J_img_pixel[0] * fx * Z_inv << " " << J_dir[0] << endl;
+              // cout << b_dir << endl;
+              // cout << "========" << endl;
+              // cout << -1.0 * J_img_pixel.transpose()(0,0) * J_pixel_xi(0,0) << endl;
+              // exit(1);
+          }
+      }
+      // cout << "cost_dir " << error_dir_loop/9 << endl;
+      cost_dir += error_dir_loop/patch;
+      // cout << "cost_dir " << cost_dir << endl;
+    }
+    // if(cnt_good){
+    H = H_dir;
+    b = b_dir;
+    // cout << H << endl;
+    // cout << b << endl;
+    // cout << "1!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!" << endl;
+    // exit(1);
+    
+    // cost += cost_dir_tmp / cnt_good;
+    cost = cost_dir/cnt_good;
+    // }
+    Vector6d dx;
+    dx = H.ldlt().solve(b);
+    cout << dx[0] << "," << dx[1] << "," << dx[2] << "," << dx[3] << "," << dx[4] << "," << dx[5] << endl;
+    if (isnan(dx[0])) {
+      cout << "result is nan!" << endl;
+      break;
+    }
+    cout << "cost: " << cost << ", last cost: " << lastCost << endl;
+
+    if (iter > 0 && cost >= lastCost) {
+      // cost increase, update is not good
+      break;
+    }
+    // update your estimation
+    cout << pose.matrix() << endl;
+    pose = Sophus::SE3d::exp(dx) * pose;
+    Mat Rt = Mat::eye(4,4,CV_64FC1);
+    Rt.at<double>(0,0) = pose.matrix()(0);
+    Rt.at<double>(1,0) = pose.matrix()(1);
+    Rt.at<double>(2,0) = pose.matrix()(2);
+    Rt.at<double>(3,0) = pose.matrix()(3);
+    Rt.at<double>(0,1) = pose.matrix()(4);
+    Rt.at<double>(1,1) = pose.matrix()(5);
+    Rt.at<double>(2,1) = pose.matrix()(6);
+    Rt.at<double>(3,1) = pose.matrix()(7);
+    Rt.at<double>(0,2) = pose.matrix()(8);
+    Rt.at<double>(1,2) = pose.matrix()(9);
+    Rt.at<double>(2,2) = pose.matrix()(10);
+    Rt.at<double>(3,2) = pose.matrix()(11);
+    Rt.at<double>(0,3) = pose.matrix()(12);
+    Rt.at<double>(1,3) = pose.matrix()(13);
+    Rt.at<double>(2,3) = pose.matrix()(14);
+    Rt.at<double>(3,3) = pose.matrix()(15);
+    cout << "pose " << Rt << endl;
+    lastCost = cost;
+
+    cout << "iteration " << iter << " cost=" << std::setprecision(12) << cost << endl;
+    if (dx.norm() < 1e-6) {
+      // converge
+      break;
+    }
+    
+  }
+  Mat Rt = Mat::eye(4,4,CV_64FC1);
+  Rt.at<double>(0,0) = pose.matrix()(0);
+  Rt.at<double>(1,0) = pose.matrix()(1);
+  Rt.at<double>(2,0) = pose.matrix()(2);
+  Rt.at<double>(3,0) = pose.matrix()(3);
+  Rt.at<double>(0,1) = pose.matrix()(4);
+  Rt.at<double>(1,1) = pose.matrix()(5);
+  Rt.at<double>(2,1) = pose.matrix()(6);
+  Rt.at<double>(3,1) = pose.matrix()(7);
+  Rt.at<double>(0,2) = pose.matrix()(8);
+  Rt.at<double>(1,2) = pose.matrix()(9);
+  Rt.at<double>(2,2) = pose.matrix()(10);
+  Rt.at<double>(3,2) = pose.matrix()(11);
+  Rt.at<double>(0,3) = pose.matrix()(12);
+  Rt.at<double>(1,3) = pose.matrix()(13);
+  Rt.at<double>(2,3) = pose.matrix()(14);
+  Rt.at<double>(3,3) = pose.matrix()(15);
+  Mat Rt_inv = Rt.inv();
+//   cout << "pose by g-n: \n" << pose.matrix() << endl;
+
+  return Rt;
+}
+double calc_residual_icp(
+   const VecVector3d &points_3d,
+  const VecVector2d &points_2d,
+  const VecVector3d &points_3d_nxt,
+  Sophus::SE3d &pose,
+  const Mat &K,
+  vector<double>& residuals
+){
+   double fx = K.at<double>(0, 0);
+  double fy = K.at<double>(1, 1);
+  double cx = K.at<double>(0, 2);
+  double cy = K.at<double>(1, 2);
+  vector<double> res_std;
+  for (int i=0; i<points_3d.size(); i++){
+     Eigen::Vector3d pc = pose * points_3d[i];
+    //  Eigen::Vector2d proj(fx * pc[0] / pc[2] + cx, fy * pc[1] / pc[2] + cy);
+    //  Eigen::Vector2d error_pnp = points_2d[i] - proj;
+     Eigen::Vector3d error = pc - points_3d_nxt[i];
+     
+     residuals.push_back(error.squaredNorm());
+      if (isnan(pc[2]) == false) {
+         res_std.push_back(error.squaredNorm());
+      }
+  }
+  // for(int i=0; i<residuals.size(); i++){
+  //   cout << "residual " << residuals[i] << endl;
+  // }
+  double total = 0;
+  for(int i=0; i<residuals.size(); i++){
+      total += residuals[i] * residuals[i];
+  }
+    cout << "total residual square " << total << endl;
+  double avg = Average(res_std); 
+  double std = Deviation(res_std,avg);
+  cout << "average " << avg << endl;
+  return std;
+}
+  
+Mat bundleAdjustmentGaussNewtonICP(
+  const VecVector3d &points_3d,
+  const VecVector2d &points_2d,
+  const VecVector3d &points_3d_nxt,
+  const Mat &K,
+  Sophus::SE3d &pose,
+  int mode) {
+  typedef Eigen::Matrix<double, 6, 1> Vector6d;
+  const int iterations = 100;
+  double cost = 0, lastCost = 0;
+  double fx = K.at<double>(0, 0);
+  double fy = K.at<double>(1, 1);
+  double cx = K.at<double>(0, 2);
+  double cy = K.at<double>(1, 2);
+   vector<double> residuals;
+   double res_std = calc_residual_icp(points_3d, points_2d, points_3d_nxt, pose, K, residuals);
+   // for(int i=0; i < residuals.size(); i++) {
+   //    cout << residuals.at(i) << endl;
+   // }
+   cout << "deviation: " << res_std << endl;
+   double huber_k = 1.345 * res_std;
+   vector<double> weight;
+   if(mode == 0){
+        for (int j=0; j<residuals.size(); j++){
+            if(residuals[j] <= huber_k){
+                weight.push_back(1.0);
+            }else {
+                weight.push_back(huber_k/residuals[j]);
+            }
+        }
+    }else {
+        for (int j=0; j<residuals.size(); j++){
+            weight.push_back(0.0);
+        }
+    }
+
+  for (int iter = 0; iter < iterations; iter++) {
+    Eigen::Matrix<double, 6, 6> H = Eigen::Matrix<double, 6, 6>::Zero();
+    Vector6d b = Vector6d::Zero();
+    cost = 0;
+    // compute cost
+    for (int i = 0; i < points_3d.size(); i++) {
+      Eigen::Vector3d pc = pose * points_3d[i];
+      Eigen::Vector2d proj(fx * pc[0] / pc[2] + cx, fy * pc[1] / pc[2] + cy);
+      // Eigen::Vector2d error_pnp = points_2d[i] - proj;
+      // Eigen::Vector3d e = pc - points_3d_nxt[i];
+      Eigen::Vector3d e = points_3d_nxt[i] - pc;
+      double inv_z = 1.0 / pc[2];
+      double inv_z2 = inv_z * inv_z;
+      // cout << "[" << points_3d[i][0] << ", " << points_3d[i][1] << "]" <<"[" << pc[0] << ", " << pc[1] << "]" <<  "[" << points_2d[i][0] << ", " << points_2d[i][1] << "]" << " [" << proj[0] << ", " << proj[1] << "]" << endl;
+      Eigen::Matrix<double, 3, 6> J;
+        J <<    -1, 0, 0, 0, -pc[2], pc[1],
+                0, -1, 0, pc[2], 0, -pc[0],
+                0, 0, -1, -pc[1], pc[0], 0;
+        cost += e.squaredNorm();
+      // cout << "J " << J << endl;
+      // cout << endl;
+      H += J.transpose() * (J * weight[i]);
+      b += -J.transpose() * (e * weight[i]);
+    }
+  // cout << "HHHHHHHHHH   " << H << endl;
+  // cout << "bbbbbbbbbbbbb     " << b << endl;
+    Vector6d dx;
+    dx = H.ldlt().solve(b);
+    if (isnan(dx[0])) {
+      cout << "result is nan!" << endl;
+      break;
+    }
+    cout << "cost: " << cost << ", last cost: " << lastCost << endl;
+
+    if (iter > 0 && cost >= lastCost) {
+      // cost increase, update is not good
+      break;
+    }
+    // update your estimation
+    pose = Sophus::SE3d::exp(dx) * pose;
+    Mat Rt = Mat::eye(4,4,CV_64FC1);
+    Rt.at<double>(0,0) = pose.matrix()(0);
+    Rt.at<double>(1,0) = pose.matrix()(1);
+    Rt.at<double>(2,0) = pose.matrix()(2);
+    Rt.at<double>(3,0) = pose.matrix()(3);
+    Rt.at<double>(0,1) = pose.matrix()(4);
+    Rt.at<double>(1,1) = pose.matrix()(5);
+    Rt.at<double>(2,1) = pose.matrix()(6);
+    Rt.at<double>(3,1) = pose.matrix()(7);
+    Rt.at<double>(0,2) = pose.matrix()(8);
+    Rt.at<double>(1,2) = pose.matrix()(9);
+    Rt.at<double>(2,2) = pose.matrix()(10);
+    Rt.at<double>(3,2) = pose.matrix()(11);
+    Rt.at<double>(0,3) = pose.matrix()(12);
+    Rt.at<double>(1,3) = pose.matrix()(13);
+    Rt.at<double>(2,3) = pose.matrix()(14);
+    Rt.at<double>(3,3) = pose.matrix()(15);
+    cout << "pose " << Rt << endl;
+    lastCost = cost;
+
+    cout << "iteration " << iter << " cost=" << std::setprecision(12) << cost << endl;
+    if (dx.norm() < 1e-6) {
+      // converge
+      break;
+    }
+    
+  }
+    Mat Rt = Mat::eye(4,4,CV_64FC1);
+    Rt.at<double>(0,0) = pose.matrix()(0);
+    Rt.at<double>(1,0) = pose.matrix()(1);
+    Rt.at<double>(2,0) = pose.matrix()(2);
+    Rt.at<double>(3,0) = pose.matrix()(3);
+    Rt.at<double>(0,1) = pose.matrix()(4);
+    Rt.at<double>(1,1) = pose.matrix()(5);
+    Rt.at<double>(2,1) = pose.matrix()(6);
+    Rt.at<double>(3,1) = pose.matrix()(7);
+    Rt.at<double>(0,2) = pose.matrix()(8);
+    Rt.at<double>(1,2) = pose.matrix()(9);
+    Rt.at<double>(2,2) = pose.matrix()(10);
+    Rt.at<double>(3,2) = pose.matrix()(11);
+    Rt.at<double>(0,3) = pose.matrix()(12);
+    Rt.at<double>(1,3) = pose.matrix()(13);
+    Rt.at<double>(2,3) = pose.matrix()(14);
+    Rt.at<double>(3,3) = pose.matrix()(15);
+    Mat Rt_inv = Rt.inv();
+    //   cout << "pose by g-n: \n" << pose.matrix() << endl;
+return Rt;
+}
+    
 Mat DirectPoseEstimationMultiLayer(
     const cv::Mat &img1,
     const cv::Mat &img2,
@@ -1384,27 +1335,39 @@ float fx = 517.3f, // default
         cost += cost_tmp / cnt_good;
     }
 }
-void find_feature_matches_another(const Mat &img_1, const Mat &img_2,
-                           std::vector<KeyPoint> &keypoints_1,
-			                  std::vector<KeyPoint> &keypoints_2,
-                           std::vector<DMatch> &matches,
-                           const Mat &img_3) {
-   Mat descriptors_1, descriptors_2, descriptors_3, descriptors_4;
-   Ptr<FeatureDetector> detector = BRISK::create();
-   Ptr<DescriptorExtractor> descriptor = BRISK::create();
-   Ptr<DescriptorMatcher> matcher = DescriptorMatcher::create("BruteForce-Hamming");
-   detector->detect(img_1, keypoints_1);
-   detector->detect(img_2, keypoints_2);
-   cout << "keypoints_1.size() "<< keypoints_1.size() << " keypoints_2.size() " << keypoints_2.size() << endl;
-   // if(keypoints_1.size() != 0 && keypoints_2.size() != 0){
-      // for (int i=0; i< keypoints_1.size(); i++){
-         // cout << "keypoint1 " << keypoints_1[i].pt << "keypoint2 " << keypoints_2[i].pt << endl;
-      // }
+void find_feature_matches_brisk(const Mat &img_1, const Mat &img_2,
+                                  std::vector<KeyPoint> &keypoints_1,
+                                  std::vector<KeyPoint> &keypoints_2,
+                                  std::vector<DMatch> &matches) {
+    Mat descriptors_1, descriptors_2;
+    Ptr<FeatureDetector> detector = BRISK::create();
+    Ptr<DescriptorExtractor> descriptor = BRISK::create();
+    // Ptr<DescriptorMatcher> matcher = DescriptorMatcher::create("BruteForce-Hamming");
+    // cv::FlannBasedMatcher matcher = cv::FlannBasedMatcher(cv::makePtr<cv::flann::LshIndexParams>(6, 12, 0));
+    Ptr<DescriptorMatcher> matcher = DescriptorMatcher::create("FlannBased");
+    matcher->clear();
+    // matcher.clear();
+    detector->detect(img_1, keypoints_1);
+    detector->detect(img_2, keypoints_2);
+    if(keypoints_1.size() == 0 || keypoints_2.size() == 0){
+        return;
+    }
     descriptor->compute(img_1, keypoints_1, descriptors_1);
     descriptor->compute(img_2, keypoints_2, descriptors_2);
-   // }
-   int eee = descriptors_1.empty();
-   int ddd = descriptors_2.empty();
+    vector<DMatch> match;
+    vector<vector<DMatch>> knn_matches; 
+    descriptors_1.convertTo(descriptors_1, CV_32F);
+    descriptors_2.convertTo(descriptors_2, CV_32F);
+    matcher->knnMatch( descriptors_1, descriptors_2, knn_matches, 2);
+    const float ratio_thresh = 0.7f;
+    for (size_t i = 0; i < knn_matches.size(); i++){
+        if(knn_matches[i].size() >= 2){
+            if (knn_matches[i][0].distance < ratio_thresh * knn_matches[i][1].distance){
+                matches.push_back(knn_matches[i][0]);
+            }
+        }
+    }
+  // }
 
 //    vector<DMatch> match;
 //    matcher->match(descriptors_1, descriptors_2, match);
@@ -1422,43 +1385,59 @@ void find_feature_matches_another(const Mat &img_1, const Mat &img_2,
 //      }
 //    }
  }
- void find_feature_matches(const Mat &img_1, const Mat &img_2,
-                           std::vector<KeyPoint> &keypoints_1,
-			                  std::vector<KeyPoint> &keypoints_2,
-                           std::vector<DMatch> &matches,
-                           const Mat &img_3) {
+void find_feature_matches_orb(const Mat &img_1, const Mat &img_2,
+                              vector<KeyPoint> &keypoints_1,
+			                        vector<KeyPoint> &keypoints_2,
+                              vector<DMatch> &matches,
+                              int level) {
 
-   Mat descriptors_1, descriptors_2, descriptors_3, descriptors_4;
-   Ptr<FeatureDetector> detector = ORB::create();
-   Ptr<DescriptorExtractor> descriptor = ORB::create();
-   Ptr<DescriptorMatcher> matcher = DescriptorMatcher::create("BruteForce-Hamming");
-   detector->detect(img_1, keypoints_1);
-   detector->detect(img_2, keypoints_2);
-   cout << "keypoints_1.size() "<< keypoints_1.size() << " keypoints_2.size() " << keypoints_2.size() << endl;
-      for (int i=0; i< keypoints_1.size(); i++){
-         // cout << "keypoint1 " << keypoints_1[i].pt << "keypoint2 " << keypoints_2[i].pt << endl;
-      }
-      descriptor->compute(img_1, keypoints_1, descriptors_1);
-      descriptor->compute(img_2, keypoints_2, descriptors_2);
-   int eee = descriptors_1.empty();
-   int ddd = descriptors_2.empty();
-//    vector<DMatch> match;
-//    matcher->match(descriptors_1, descriptors_2, match);
-//    double min_dist = 10000, max_dist = 0;
-//      for (int i = 0; i < descriptors_1.rows; i++) {
-//     double dist = match[i].distance;
-//      if (dist < min_dist) min_dist = dist;
-//      if (dist > max_dist) max_dist = dist;
-//    }
-
-//    printf("-- Max dist : %f \n", max_dist);
-//    printf("-- Min dist : %f \n", min_dist);
-//    for (int i = 0; i < descriptors_1.rows; i++) {
-//     if (match[i].distance <= max(2 * min_dist, 10.0)) {
-//        matches.push_back(match[i]);
-//      }
-//    }
- }
+    Mat descriptors_1, descriptors_2;
+    int nfeatures = 1000;
+    Ptr<ORB> detector = ORB::create(nfeatures);
+    // detector->setNLevels(nlevels[level]);
+    // detector->setEdgeThreshold(edgeThresholds[level]);
+    // detector->setPatchSize(patchSizes[level]);
+    // cout << nlevels[level] <<  " " <<  edgeThresholds[level] << " " << patchSizes[level] << endl;
+    Ptr<DescriptorExtractor> descriptor = ORB::create(nfeatures);
+    // Ptr<DescriptorMatcher> matcher = DescriptorMatcher::create("BruteForce-Hamming");
+    // cv::FlannBasedMatcher matcher = cv::FlannBasedMatcher(cv::makePtr<cv::flann::LshIndexParams>(6, 12, 0));
+    // detector->detect(img_1, keypoints_1);
+    // detector->detect(img_2, keypoints_2);
+    // // cout << "key " << keypoints_1.size() << " " << keypoints_2.size() << endl;
+    // descriptor->compute(img_1, keypoints_1, descriptors_1);
+    // descriptor->compute(img_2, keypoints_2, descriptors_2);
+    detector->detectAndCompute(img_1, noArray(), keypoints_1, descriptors_1);
+    detector->detectAndCompute(img_2, noArray(), keypoints_2, descriptors_2);
+    for (int i=0; i<1000; i++) {
+        // cout << "(" << keypoints_1[i].pt.x << "," << keypoints_1[i].pt.y << ") (" << keypoints_2[i].pt.x << "," << keypoints_2[i].pt.y << ") " << endl;
+        // cout << descriptors_1.row(i) << endl;
+        // cout << "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!" << endl;
+        // cout << descriptors_2.row(i) << endl;
+        // cout << "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" << endl;
+    }
+    cout << "key2 " << keypoints_1.size() << " " << keypoints_2.size() << endl;
+    Ptr<DescriptorMatcher> matcher = DescriptorMatcher::create("FlannBased");
+    matcher->clear();
+    // matcher.clear();
+    vector<DMatch> match;
+    vector<vector<DMatch>> knn_matches; 
+    descriptors_1.convertTo(descriptors_1, CV_32F);
+    descriptors_2.convertTo(descriptors_2, CV_32F);
+    matcher->knnMatch( descriptors_1, descriptors_2, knn_matches, 2);
+    cout << "knn " << knn_matches.size() << " " << matches.size() << " " << descriptors_1.type() << " " << descriptors_2.type() << " " << img_1.type() << " " << img_2.type() << endl;
+    cout << "key " << matches.size() << " " << keypoints_1.size() << " " << keypoints_2.size() << endl;
+    // cout << img_1.rowRange(0,2) << endl;
+    // cout << img_2.rowRange(0,2) << endl;
+    const float ratio_thresh = 0.7f;
+    for (size_t i = 0; i < knn_matches.size(); i++){
+        // cout << i << " " << knn_matches[i].size() << " " << knn_matches[i][0].distance << " " << ratio_thresh * knn_matches[i][1].distance << endl;
+        if(knn_matches[i].size() >= 2){
+            if (knn_matches[i][0].distance < ratio_thresh * knn_matches[i][1].distance){
+                matches.push_back(knn_matches[i][0]);
+            }
+        }
+    }
+}
 
  Point2d pixel2cam(const Point2d &p, const Mat &K) {
    return Point2d
@@ -1866,448 +1845,70 @@ Mat bundleAdjustmentGaussNewton(
 }
 
 
-double calc_residual_dir(
-   const VecVector3d &points_3d,
-  const VecVector2d &points_2d,
-  const VecVector3d &points_3d_nxt,
-  Sophus::SE3d &pose,
-  const Mat &K,
-  vector<double>& residuals,
-  const Mat &img1,
-  const Mat &img2
-){
-   double fx = K.at<double>(0, 0);
-  double fy = K.at<double>(1, 1);
-  double cx = K.at<double>(0, 2);
-  double cy = K.at<double>(1, 2);
-  const int half_patch_size = 1;
-  vector<double> res_std;
-  for (int i=0; i<points_3d.size(); i++){
-     Eigen::Vector3d pc = pose * points_3d[i];
-     Eigen::Vector2d proj(fx * pc[0] / pc[2] + cx, fy * pc[1] / pc[2] + cy);
-    //  Eigen::Vector2d error_pnp = points_2d[i] - proj;
-    //  Eigen::Vector3d error = points_3d_nxt[i] - pc;
-    double error = 0;
-    Eigen::Vector2d orig(fx * points_3d[i][0] / points_3d[i][2] + cx, fy * points_3d[i][1] / points_3d[i][2] + cy);
-     for (int x = -half_patch_size; x <= half_patch_size; x++){
-        for (int y = -half_patch_size; y <= half_patch_size; y++) {
-            double error_direct = GetPixelValue(img2, proj[0] + x, proj[1] + y) - GetPixelValue(img1, orig[0] + x, orig[1] + y);
-            error += error_direct;
-        }
-    }
-     residuals.push_back(error);
-     if (proj[0] < half_patch_size || proj[0] > img2.cols - half_patch_size || proj[1] < half_patch_size ||
-            proj[1] > img2.rows - half_patch_size || isnan(pc[2]) == false) {
-         res_std.push_back(error);
-      }
-  }
-  // for(int i=0; i<residuals.size(); i++){
-  //   cout << "residual " << residuals[i] << endl;
-  // }
-  double total = 0;
-  for(int i=0; i<residuals.size(); i++){
-      total += residuals[i] * residuals[i];
-  }
-    cout << "total residual square " << total << endl;
-  double avg = Average(res_std); 
-  double std = Deviation(res_std,avg);
-  cout << "average " << avg << endl;
-  return std;
-}
-Mat bundleAdjustmentGaussNewtonDir(
-  const VecVector3d &points_3d,
-  const VecVector2d &points_2d,
-  const VecVector3d &points_3d_nxt,
-  const Mat &K,
-  Sophus::SE3d &pose,
-  int mode,
-  const cv::Mat &img1,
-  const cv::Mat &img2
-  ) {
-  typedef Eigen::Matrix<double, 6, 1> Vector6d;
-  const int iterations = 100;
-  double cost = 0, lastCost = 0;
-  double fx = K.at<double>(0, 0);
-  double fy = K.at<double>(1, 1);
-  double cx = K.at<double>(0, 2);
-  double cy = K.at<double>(1, 2);
-   vector<double> residuals;
-   double res_std = calc_residual_dir(points_3d, points_2d, points_3d_nxt, pose, K, residuals, img1, img2);
-   // for(int i=0; i < residuals.size(); i++) {
-   //    cout << residuals.at(i) << endl;
-   // }
-   cout << "deviation: " << res_std << endl;
-   double huber_k = 1.345 * res_std;
-   vector<double> weight_dir;
-   if(mode == 0){
-        for (int j=0; j<residuals.size(); j++){
-            if(residuals[j] <= huber_k){
-                weight_dir.push_back(1.0);
-            }else {
-                weight_dir.push_back(huber_k/residuals[j]);
-            }
-        }
-    }else {
-        for (int j=0; j<residuals.size(); j++){
-            weight_dir.push_back(0.0);
-        }
-    }
 
-  for (int iter = 0; iter < iterations; iter++) {
-    Eigen::Matrix<double, 6, 6> H = Eigen::Matrix<double, 6, 6>::Zero();
-    Vector6d b = Vector6d::Zero();
-    Eigen::Matrix<double, 6, 6> H_dir = Eigen::Matrix<double, 6, 6>::Zero();
-    Vector6d b_dir = Vector6d::Zero();
-    const int half_patch_size = 1;
-    int cnt_good = 0;
-    double cost_dir_tmp = 0;
-    // compute cost
-    for (int i = 0; i < points_3d.size(); i++) {
-      Eigen::Vector2d orig(fx * points_3d[i][0] / points_3d[i][2] + cx, fy * points_3d[i][1] / points_3d[i][2] + cy);
-      Eigen::Vector3d pc = pose * points_3d[i];
-      Eigen::Vector2d proj(fx * pc[0] / pc[2] + cx, fy * pc[1] / pc[2] + cy);
-      // Eigen::Vector2d error_pnp = points_2d[i] - proj;
-      // Eigen::Vector3d e = pc - points_3d_nxt[i];
-      // double inv_z = 1.0 / pc[2];
-      // double inv_z2 = inv_z * inv_z;
-      if (proj[0] < half_patch_size || proj[0] > img2.cols - half_patch_size || proj[1] < half_patch_size || proj[1] > img2.rows - half_patch_size || isnan(pc[2])){
-        continue;
-      }
-      // "[" << points_3d[i][0] << ", " << points_3d[i][1] << "]" <<"[" << pc[0] << ", " << pc[1] << "]" <<  
-      cnt_good = cnt_good + 1;
-      // cout << "[" << points_2d[i][0] << ", " << points_2d[i][1] << "]" << " [" << proj[0] << ", " << proj[1] << "]" << endl;
-      double total_error_dir = 0;
-      double X = pc[0], Y = pc[1], Z = pc[2], Z2 = Z * Z, Z_inv = 1.0 / Z, Z2_inv = Z_inv * Z_inv;
-      for (int x = -half_patch_size; x <= half_patch_size; x++){
-          for (int y = -half_patch_size; y <= half_patch_size; y++) {
+  
 
-              // double error_dir = GetPixelValue(img1, orig[0] + x, orig[1] + y) -
-              //             GetPixelValue(img2, proj[0] + x, proj[1] + y);
-              double error_dir = GetPixelValue(img2, proj[0] + x, proj[1] + y) - GetPixelValue(img1, orig[0] + x, orig[1] + y);
-              Eigen::Matrix<double, 2, 6> J_pixel_xi;
-              Eigen::Vector2d J_img_pixel;
-              J_pixel_xi(0, 0) = fx * Z_inv;
-              J_pixel_xi(0, 1) = 0;
-              J_pixel_xi(0, 2) = -fx * X * Z2_inv;
-              J_pixel_xi(0, 3) = -fx * X * Y * Z2_inv;
-              J_pixel_xi(0, 4) = fx + fx * X * X * Z2_inv;
-              J_pixel_xi(0, 5) = -fx * Y * Z_inv;
-
-              J_pixel_xi(1, 0) = 0;
-              J_pixel_xi(1, 1) = fy * Z_inv;
-              J_pixel_xi(1, 2) = -fy * Y * Z2_inv;
-              J_pixel_xi(1, 3) = -fy - fy * Y * Y * Z2_inv;
-              J_pixel_xi(1, 4) = fy * X * Y * Z2_inv;
-              J_pixel_xi(1, 5) = fy * X * Z_inv;
-
-              J_img_pixel = Eigen::Vector2d(
-                  0.5 * (GetPixelValue(img2, proj[0] + 1 + x, proj[1] + y) - GetPixelValue(img2, proj[0] - 1 + x, proj[1] + y)),
-                  0.5 * (GetPixelValue(img2, proj[0] + x, proj[1] + 1 + y) - GetPixelValue(img2, proj[0] + x, proj[1] - 1 + y))
-              );
-              // total jacobian
-              Vector6d J_dir = -1.0 * (J_img_pixel.transpose() * J_pixel_xi).transpose();
-              cost_dir_tmp += error_dir * error_dir;
-
-              H_dir += J_dir * J_dir.transpose()*weight_dir[i];
-              b_dir += error_dir * J_dir*weight_dir[i];
-              total_error_dir += error_dir;
-          }
-        }
-      // cout << "J " << J << endl;
-      // cout << endl;
-    }
-    if(cnt_good){
-        H += H_dir;
-        b += b_dir;
-        // cost += cost_dir_tmp / cnt_good;
-        cost += cost_dir_tmp;
-    }
-  // cout << "HHHHHHHHHH   " << H << endl;
-  // cout << "bbbbbbbbbbbbb     " << b << endl;
-    Vector6d dx;
-    dx = H.ldlt().solve(b);
-    if (isnan(dx[0])) {
-      cout << "result is nan!" << endl;
-      break;
-    }
-    cout << "cost: " << cost << ", last cost: " << lastCost << endl;
-
-    if (iter > 0 && cost >= lastCost) {
-      // cost increase, update is not good
-      break;
-    }
-    // update your estimation
-    pose = Sophus::SE3d::exp(dx) * pose;
-    Mat Rt = Mat::eye(4,4,CV_64FC1);
-      Rt.at<double>(0,0) = pose.matrix()(0);
-      Rt.at<double>(1,0) = pose.matrix()(1);
-      Rt.at<double>(2,0) = pose.matrix()(2);
-      Rt.at<double>(3,0) = pose.matrix()(3);
-      Rt.at<double>(0,1) = pose.matrix()(4);
-      Rt.at<double>(1,1) = pose.matrix()(5);
-      Rt.at<double>(2,1) = pose.matrix()(6);
-      Rt.at<double>(3,1) = pose.matrix()(7);
-      Rt.at<double>(0,2) = pose.matrix()(8);
-      Rt.at<double>(1,2) = pose.matrix()(9);
-      Rt.at<double>(2,2) = pose.matrix()(10);
-      Rt.at<double>(3,2) = pose.matrix()(11);
-      Rt.at<double>(0,3) = pose.matrix()(12);
-      Rt.at<double>(1,3) = pose.matrix()(13);
-      Rt.at<double>(2,3) = pose.matrix()(14);
-      Rt.at<double>(3,3) = pose.matrix()(15);
-    cout << "pose " << Rt << endl;
-    lastCost = cost;
-
-    cout << "iteration " << iter << " cost=" << std::setprecision(12) << cost << endl;
-    if (dx.norm() < 1e-6) {
-      // converge
-      break;
-    }
-    
-  }
-   Mat Rt = Mat::eye(4,4,CV_64FC1);
-      Rt.at<double>(0,0) = pose.matrix()(0);
-      Rt.at<double>(1,0) = pose.matrix()(1);
-      Rt.at<double>(2,0) = pose.matrix()(2);
-      Rt.at<double>(3,0) = pose.matrix()(3);
-      Rt.at<double>(0,1) = pose.matrix()(4);
-      Rt.at<double>(1,1) = pose.matrix()(5);
-      Rt.at<double>(2,1) = pose.matrix()(6);
-      Rt.at<double>(3,1) = pose.matrix()(7);
-      Rt.at<double>(0,2) = pose.matrix()(8);
-      Rt.at<double>(1,2) = pose.matrix()(9);
-      Rt.at<double>(2,2) = pose.matrix()(10);
-      Rt.at<double>(3,2) = pose.matrix()(11);
-      Rt.at<double>(0,3) = pose.matrix()(12);
-      Rt.at<double>(1,3) = pose.matrix()(13);
-      Rt.at<double>(2,3) = pose.matrix()(14);
-      Rt.at<double>(3,3) = pose.matrix()(15);
-      Mat Rt_inv = Rt.inv();
-    //   cout << "pose by g-n: \n" << pose.matrix() << endl;
-
-      return Rt;
-}
-double calc_residual_icp(
-   const VecVector3d &points_3d,
-  const VecVector2d &points_2d,
-  const VecVector3d &points_3d_nxt,
-  Sophus::SE3d &pose,
-  const Mat &K,
-  vector<double>& residuals
-){
-   double fx = K.at<double>(0, 0);
-  double fy = K.at<double>(1, 1);
-  double cx = K.at<double>(0, 2);
-  double cy = K.at<double>(1, 2);
-  vector<double> res_std;
-  for (int i=0; i<points_3d.size(); i++){
-     Eigen::Vector3d pc = pose * points_3d[i];
-    //  Eigen::Vector2d proj(fx * pc[0] / pc[2] + cx, fy * pc[1] / pc[2] + cy);
-    //  Eigen::Vector2d error_pnp = points_2d[i] - proj;
-     Eigen::Vector3d error = pc - points_3d_nxt[i];
-     
-     residuals.push_back(error.squaredNorm());
-      if (isnan(pc[2]) == false) {
-         res_std.push_back(error.squaredNorm());
-      }
-  }
-  // for(int i=0; i<residuals.size(); i++){
-  //   cout << "residual " << residuals[i] << endl;
-  // }
-  double total = 0;
-  for(int i=0; i<residuals.size(); i++){
-      total += residuals[i] * residuals[i];
-  }
-    cout << "total residual square " << total << endl;
-  double avg = Average(res_std); 
-  double std = Deviation(res_std,avg);
-  cout << "average " << avg << endl;
-  return std;
-}
-Mat bundleAdjustmentGaussNewtonICP(
-  const VecVector3d &points_3d,
-  const VecVector2d &points_2d,
-  const VecVector3d &points_3d_nxt,
-  const Mat &K,
-  Sophus::SE3d &pose,
-  int mode) {
-  typedef Eigen::Matrix<double, 6, 1> Vector6d;
-  const int iterations = 100;
-  double cost = 0, lastCost = 0;
-  double fx = K.at<double>(0, 0);
-  double fy = K.at<double>(1, 1);
-  double cx = K.at<double>(0, 2);
-  double cy = K.at<double>(1, 2);
-   vector<double> residuals;
-   double res_std = calc_residual_icp(points_3d, points_2d, points_3d_nxt, pose, K, residuals);
-   // for(int i=0; i < residuals.size(); i++) {
-   //    cout << residuals.at(i) << endl;
-   // }
-   cout << "deviation: " << res_std << endl;
-   double huber_k = 1.345 * res_std;
-   vector<double> weight;
-   if(mode == 0){
-        for (int j=0; j<residuals.size(); j++){
-            if(residuals[j] <= huber_k){
-                weight.push_back(1.0);
-            }else {
-                weight.push_back(huber_k/residuals[j]);
-            }
-        }
-    }else {
-        for (int j=0; j<residuals.size(); j++){
-            weight.push_back(0.0);
-        }
-    }
-
-  for (int iter = 0; iter < iterations; iter++) {
-    Eigen::Matrix<double, 6, 6> H = Eigen::Matrix<double, 6, 6>::Zero();
-    Vector6d b = Vector6d::Zero();
-    cost = 0;
-    // compute cost
-    for (int i = 0; i < points_3d.size(); i++) {
-      Eigen::Vector3d pc = pose * points_3d[i];
-      Eigen::Vector2d proj(fx * pc[0] / pc[2] + cx, fy * pc[1] / pc[2] + cy);
-      // Eigen::Vector2d error_pnp = points_2d[i] - proj;
-      Eigen::Vector3d e = pc - points_3d_nxt[i];
-      double inv_z = 1.0 / pc[2];
-      double inv_z2 = inv_z * inv_z;
-      // cout << "[" << points_3d[i][0] << ", " << points_3d[i][1] << "]" <<"[" << pc[0] << ", " << pc[1] << "]" <<  "[" << points_2d[i][0] << ", " << points_2d[i][1] << "]" << " [" << proj[0] << ", " << proj[1] << "]" << endl;
-      Eigen::Matrix<double, 3, 6> J;
-        J << 1, 0, 0, 0, pc[2], pc[1],
-                0, 1, 0, -pc[2], 0, pc[0],
-                0, 0, 1, pc[1], -pc[0], 0;
-        cost += e.squaredNorm();
-      // cout << "J " << J << endl;
-      // cout << endl;
-      H += J.transpose() * (J * weight[i]);
-      b += -J.transpose() * (e * weight[i]);
-    }
-  // cout << "HHHHHHHHHH   " << H << endl;
-  // cout << "bbbbbbbbbbbbb     " << b << endl;
-    Vector6d dx;
-    dx = H.ldlt().solve(b);
-    if (isnan(dx[0])) {
-      cout << "result is nan!" << endl;
-      break;
-    }
-    cout << "cost: " << cost << ", last cost: " << lastCost << endl;
-
-    if (iter > 0 && cost >= lastCost) {
-      // cost increase, update is not good
-      break;
-    }
-    // update your estimation
-    pose = Sophus::SE3d::exp(dx) * pose;
-    Mat Rt = Mat::eye(4,4,CV_64FC1);
-      Rt.at<double>(0,0) = pose.matrix()(0);
-      Rt.at<double>(1,0) = pose.matrix()(1);
-      Rt.at<double>(2,0) = pose.matrix()(2);
-      Rt.at<double>(3,0) = pose.matrix()(3);
-      Rt.at<double>(0,1) = pose.matrix()(4);
-      Rt.at<double>(1,1) = pose.matrix()(5);
-      Rt.at<double>(2,1) = pose.matrix()(6);
-      Rt.at<double>(3,1) = pose.matrix()(7);
-      Rt.at<double>(0,2) = pose.matrix()(8);
-      Rt.at<double>(1,2) = pose.matrix()(9);
-      Rt.at<double>(2,2) = pose.matrix()(10);
-      Rt.at<double>(3,2) = pose.matrix()(11);
-      Rt.at<double>(0,3) = pose.matrix()(12);
-      Rt.at<double>(1,3) = pose.matrix()(13);
-      Rt.at<double>(2,3) = pose.matrix()(14);
-      Rt.at<double>(3,3) = pose.matrix()(15);
-    cout << "pose " << Rt << endl;
-    lastCost = cost;
-
-    cout << "iteration " << iter << " cost=" << std::setprecision(12) << cost << endl;
-    if (dx.norm() < 1e-6) {
-      // converge
-      break;
-    }
-    
-  }
-   Mat Rt = Mat::eye(4,4,CV_64FC1);
-      Rt.at<double>(0,0) = pose.matrix()(0);
-      Rt.at<double>(1,0) = pose.matrix()(1);
-      Rt.at<double>(2,0) = pose.matrix()(2);
-      Rt.at<double>(3,0) = pose.matrix()(3);
-      Rt.at<double>(0,1) = pose.matrix()(4);
-      Rt.at<double>(1,1) = pose.matrix()(5);
-      Rt.at<double>(2,1) = pose.matrix()(6);
-      Rt.at<double>(3,1) = pose.matrix()(7);
-      Rt.at<double>(0,2) = pose.matrix()(8);
-      Rt.at<double>(1,2) = pose.matrix()(9);
-      Rt.at<double>(2,2) = pose.matrix()(10);
-      Rt.at<double>(3,2) = pose.matrix()(11);
-      Rt.at<double>(0,3) = pose.matrix()(12);
-      Rt.at<double>(1,3) = pose.matrix()(13);
-      Rt.at<double>(2,3) = pose.matrix()(14);
-      Rt.at<double>(3,3) = pose.matrix()(15);
-    Mat Rt_inv = Rt.inv();
-    //   cout << "pose by g-n: \n" << pose.matrix() << endl;
-
-      return Rt_inv;
-}
 double calc_residual_pnp(
-   const VecVector3d &points_3d,
-  const VecVector2d &points_2d,
-  Sophus::SE3d &pose,
-  const Mat &K,
-  vector<double>& residuals
+    const VecVector3d &points_3d,
+    const VecVector2d &points_2d,
+    Sophus::SE3d &pose,
+    const Mat &K,
+    vector<double>& residuals
 ){
-   double fx = K.at<double>(0, 0);
-  double fy = K.at<double>(1, 1);
-  double cx = K.at<double>(0, 2);
-  double cy = K.at<double>(1, 2);
-  vector<double> res_std;
-  cout << points_3d.size() << endl;
-  for (int i=0; i<points_3d.size(); i++){
-     Eigen::Vector3d pc = pose * points_3d[i];
-     Eigen::Vector2d proj(fx * pc[0] / pc[2] + cx, fy * pc[1] / pc[2] + cy);
-     Eigen::Vector2d error = proj - points_2d[i];
-     
-     residuals.push_back(error.squaredNorm());
-      if (isnan(pc[2]) == false) {
-         res_std.push_back(error.squaredNorm());
-      }
-  }
+    double fx = K.at<double>(0, 0);
+    double fy = K.at<double>(1, 1);
+    double cx = K.at<double>(0, 2);
+    double cy = K.at<double>(1, 2);
+    vector<double> res_std;
+    cout << points_3d.size() << endl;
+    for (int i=0; i<points_3d.size(); i++){
+        Eigen::Vector3d pc = pose * points_3d[i];
+        Eigen::Vector2d proj(fx * pc[0] / pc[2] + cx, fy * pc[1] / pc[2] + cy);
+        Eigen::Vector2d error = proj - points_2d[i];
+        
+        residuals.push_back(error.squaredNorm());
+        if (isnan(pc[2]) == false) {
+            res_std.push_back(error.squaredNorm());
+        }
+    }
   // for(int i=0; i<residuals.size(); i++){
   //   cout << "residual " << residuals[i] << endl;
   // }
-  double total = 0;
-  cout << residuals.size() << endl;
-  // exit(1);
-  for(int i=0; i<residuals.size(); i++){
-      total += residuals[i] * residuals[i];
-  }
+    double total = 0;
+    cout << residuals.size() << endl;
+    // exit(1);
+    for(int i=0; i<residuals.size(); i++){
+        total += residuals[i] * residuals[i];
+    }
     cout << "total residual square " << total << endl;
-  double avg = Average(res_std); 
-  double std = Deviation(res_std,avg);
-  cout << "average " << avg << endl;
-  return std;
+    double avg = Average(res_std); 
+    double std = Deviation(res_std,avg);
+    cout << "average " << avg << endl;
+    return std;
 }
 Mat bundleAdjustmentGaussNewtonPnP(
-  const VecVector3d &points_3d,
-  const VecVector2d &points_2d,
-  const Mat &K,
-  Sophus::SE3d &pose,
-  int mode) {
-  typedef Eigen::Matrix<double, 6, 1> Vector6d;
-  const int iterations = 100;
-  double cost = 0, lastCost = 0;
-  double fx = K.at<double>(0, 0);
-  double fy = K.at<double>(1, 1);
-  double cx = K.at<double>(0, 2);
-  double cy = K.at<double>(1, 2);
-   vector<double> residuals;
-   double res_std = calc_residual_pnp(points_3d, points_2d, pose, K, residuals);
-   // for(int i=0; i < residuals.size(); i++) {
-   //    cout << residuals.at(i) << endl;
-   // }
-   cout << "deviation: " << res_std << endl;
-   double huber_k = 1.345 * res_std;
-   vector<double> weight;
-   if(mode == 0){
+    const VecVector3d &points_3d,
+    const VecVector2d &points_2d,
+    const Mat &K,
+    Sophus::SE3d &pose,
+    int mode) {
+
+    typedef Eigen::Matrix<double, 6, 1> Vector6d;
+    const int iterations = 10;
+    double cost = 0, lastCost = 0;
+    double fx = K.at<double>(0, 0);
+    double fy = K.at<double>(1, 1);
+    double cx = K.at<double>(0, 2);
+    double cy = K.at<double>(1, 2);
+    vector<double> residuals;
+    double res_std = calc_residual_pnp(points_3d, points_2d, pose, K, residuals);
+    // for(int i=0; i < residuals.size(); i++) {
+    //    cout << residuals.at(i) << endl;
+    // }
+    cout << "deviation: " << res_std << endl;
+    double huber_k = 1.345 * res_std;
+    vector<double> weight;
+    if(mode == 0){
         for (int j=0; j<residuals.size(); j++){
             if(residuals[j] <= huber_k){
                 weight.push_back(1.0);
@@ -2324,112 +1925,113 @@ Mat bundleAdjustmentGaussNewtonPnP(
         }
     }
 
-  for (int iter = 0; iter < iterations; iter++) {
-    Eigen::Matrix<double, 6, 6> H = Eigen::Matrix<double, 6, 6>::Zero();
-    Vector6d b = Vector6d::Zero();
-    cost = 0;
-    // compute cost
-    for (int i = 0; i < points_3d.size(); i++) {
-      Eigen::Vector3d pc = pose * points_3d[i];
-      double inv_z = 1.0 / pc[2];
-      double inv_z2 = inv_z * inv_z;
-      Eigen::Vector2d proj(fx * pc[0] / pc[2] + cx, fy * pc[1] / pc[2] + cy);
-      Eigen::Vector2d e = proj - points_2d[i];
-      // Eigen::Vector2d e = proj - points_2d[i];
-      // cout <<  "[" << points_2d[i][0] << ", " << points_2d[i][1] << "]" << " [" << proj[0] << ", " << proj[1] << "]" << endl;
-      // cout << fx << " " << inv_z << " " << inv_z2 << " " << fx << " " << fy << endl;
-      cost += e.squaredNorm();
-      // Eigen::Vector3d pc = (Rt * (points_3d[i].homogeneous())).transpose().hnormalized();
-      // double inv_z = 1.0 / pc[2];
-      // double inv_z2 = inv_z * inv_z;
-      // Eigen::Vector2d proj(fx * pc[0] / pc[2] + cx, fy * pc[1] / pc[2] + cy);
-      // Eigen::Vector2d e = points_2d[i] - proj;
-      // // "[" << pts_3d_eigen[i][0] << ", " << pts_3d_eigen[i][1] << "]" <<"[" << pc[0] << ", " << pc[1] << "]" <<
-      // cout <<  "[" << points_2d[i][0] << ", " << points_2d[i][1] << "]" << " [" << proj[0] << ", " << proj[1] << "]" << endl;
-      // cout << fx << " " << inv_z << " " << inv_z2 << " " << fx << " " << fy << endl;
-      // cost += e.squaredNorm();
-      Eigen::Matrix<double, 2, 6> J;
-      J << -fx * inv_z,
-        0,
-        fx * pc[0] * inv_z2,
-        fx * pc[0] * pc[1] * inv_z2,
-        -fx - fx * pc[0] * pc[0] * inv_z2,
-        fx * pc[1] * inv_z,
-        0,
-        -fy * inv_z,
-        fy * pc[1] * inv_z2,
-        fy + fy * pc[1] * pc[1] * inv_z2,
-        -fy * pc[0] * pc[1] * inv_z2,
-        -fy * pc[0] * inv_z;
-      // cout << "J " << J << endl;
-      // cout << endl;
-      H += J.transpose() * (J * weight[i]);
-      b += -J.transpose() * (e * weight[i]);
-      // cout << J << endl;
-      // cout << weight[i] << " " << e << endl;
+    for (int iter = 0; iter < iterations; iter++) {
+        Eigen::Matrix<double, 6, 6> H = Eigen::Matrix<double, 6, 6>::Zero();
+        Vector6d b = Vector6d::Zero();
+        cost = 0;
+        // compute cost
+        for (int i = 0; i < points_3d.size(); i++) {
+            Eigen::Vector3d pc = pose * points_3d[i];
+            double inv_z = 1.0 / pc[2];
+            double inv_z2 = inv_z * inv_z;
+            Eigen::Vector2d proj(fx * pc[0] / pc[2] + cx, fy * pc[1] / pc[2] + cy);
+            // Eigen::Vector2d e = proj - points_2d[i];
+            Eigen::Vector2d e = points_2d[i] - proj;
+            // cout << " [" << proj[0] << ", " << proj[1] << "] [" << points_2d[i][0] << ", " << points_2d[i][1] << "]" << endl;
+            // cout << fx << " " << inv_z << " " << inv_z2 << " " << fx << " " << fy << endl;
+            cost += e.squaredNorm();
+            // cout << e.squaredNorm()  << " " << cost << endl;
+            // Eigen::Vector3d pc = (Rt * (points_3d[i].homogeneous())).transpose().hnormalized();
+            // double inv_z = 1.0 / pc[2];
+            // double inv_z2 = inv_z * inv_z;
+            // Eigen::Vector2d proj(fx * pc[0] / pc[2] + cx, fy * pc[1] / pc[2] + cy);
+            // Eigen::Vector2d e = points_2d[i] - proj;
+            // // "[" << pts_3d_eigen[i][0] << ", " << pts_3d_eigen[i][1] << "]" <<"[" << pc[0] << ", " << pc[1] << "]" <<
+            // cout <<  "[" << points_2d[i][0] << ", " << points_2d[i][1] << "]" << " [" << proj[0] << ", " << proj[1] << "]" << endl;
+            // cout << fx << " " << inv_z << " " << inv_z2 << " " << fx << " " << fy << endl;
+            // cost += e.squaredNorm();
+            Eigen::Matrix<double, 2, 6> J;
+            J << -fx * inv_z,
+                0,
+                fx * pc[0] * inv_z2,
+                fx * pc[0] * pc[1] * inv_z2,
+                -fx - fx * pc[0] * pc[0] * inv_z2,
+                fx * pc[1] * inv_z,
+                0,
+                -fy * inv_z,
+                fy * pc[1] * inv_z2,
+                fy + fy * pc[1] * pc[1] * inv_z2,
+                -fy * pc[0] * pc[1] * inv_z2,
+                -fy * pc[0] * inv_z;
+            // cout << "J " << J << endl;
+            // cout << endl;
+            H += J.transpose() * (J * weight[i]);
+            b += -J.transpose() * (e * weight[i]);
+            // cout << J << endl;
+            // cout << weight[i] << " " << e << endl;
+        }
+        // cout << "HHHHHHHHHH   " << H << endl;
+        // cout << "bbbbbbbbbbbbb     " << b << endl;
+        Vector6d dx;
+        dx = H.ldlt().solve(b);
+
+        Mat test;
+        Mat ksi(cv::Size(6, 1), test.type());
+        Mat currRt(cv::Size(6, 6), test.type());
+
+        cv::eigen2cv(dx, ksi);
+        cout << ksi.size() << endl;
+        computeProjectiveMatrix(ksi, currRt);
+        cout << "current" << currRt << " " << ksi << endl;
+        if (isnan(dx[0])) {
+            cout << "result is nan!" << endl;
+            break;
+        }
+        
+        cout << "cost: " << cost << " last cost: " << lastCost << endl;
+
+        if (iter > 0 && cost >= lastCost) {
+            // cost increase, update is not good
+            break;
+        }
+
+        // update your estimation
+        
+        cout << "dx " << dx << endl;
+        cout << "old pose " << pose.matrix() << endl;
+        pose = Sophus::SE3d::exp(dx) * pose;
+        cout << "new pose " << pose.matrix() << endl;
+        lastCost = cost;
+
+        cout << "iteration " << iter << " cost=" << std::setprecision(12) << cost << endl;
+        if (dx.norm() < 1e-8) {
+            // converge
+            cout << "converge" << endl;
+            break;
+        }
+        
     }
-  // cout << "HHHHHHHHHH   " << H << endl;
-  // cout << "bbbbbbbbbbbbb     " << b << endl;
-  Vector6d dx;
-  dx = H.ldlt().solve(b);
+    Mat Rt = Mat::eye(4,4,CV_64FC1);
+    Rt.at<double>(0,0) = pose.matrix()(0);
+    Rt.at<double>(1,0) = pose.matrix()(1);
+    Rt.at<double>(2,0) = pose.matrix()(2);
+    Rt.at<double>(3,0) = pose.matrix()(3);
+    Rt.at<double>(0,1) = pose.matrix()(4);
+    Rt.at<double>(1,1) = pose.matrix()(5);
+    Rt.at<double>(2,1) = pose.matrix()(6);
+    Rt.at<double>(3,1) = pose.matrix()(7);
+    Rt.at<double>(0,2) = pose.matrix()(8);
+    Rt.at<double>(1,2) = pose.matrix()(9);
+    Rt.at<double>(2,2) = pose.matrix()(10);
+    Rt.at<double>(3,2) = pose.matrix()(11);
+    Rt.at<double>(0,3) = pose.matrix()(12);
+    Rt.at<double>(1,3) = pose.matrix()(13);
+    Rt.at<double>(2,3) = pose.matrix()(14);
+    Rt.at<double>(3,3) = pose.matrix()(15);
 
-  Mat test;
-  Mat ksi(cv::Size(6, 1), test.type());
-  Mat currRt(cv::Size(6, 6), test.type());
-
-  cv::eigen2cv(dx, ksi);
-  // cout << ksi.size() << endl;
-  computeProjectiveMatrix(ksi, currRt);
-  // cout << "current" << currRt << endl;
-    if (isnan(dx[0])) {
-      cout << "result is nan!" << endl;
-      break;
-    }
-    
-    cout << "cost: " << cost << ", last cost: " << lastCost << endl;
-
-    if (iter > 0 && cost >= lastCost) {
-      // cost increase, update is not good
-      break;
-    }
-
-    // update your estimation
-    
-    cout << "dx " << dx << endl;
-    cout << "old pose " << pose.matrix() << endl;
-    pose = Sophus::SE3d::exp(dx) * pose;
-    cout << "new pose " << pose.matrix() << endl;
-    lastCost = cost;
-
-    cout << "iteration " << iter << " cost=" << std::setprecision(12) << cost << endl;
-    if (dx.norm() < 1e-8) {
-      // converge
-      cout << "converge" << endl;
-      break;
-    }
-    
-  }
-   Mat Rt = Mat::eye(4,4,CV_64FC1);
-      Rt.at<double>(0,0) = pose.matrix()(0);
-      Rt.at<double>(1,0) = pose.matrix()(1);
-      Rt.at<double>(2,0) = pose.matrix()(2);
-      Rt.at<double>(3,0) = pose.matrix()(3);
-      Rt.at<double>(0,1) = pose.matrix()(4);
-      Rt.at<double>(1,1) = pose.matrix()(5);
-      Rt.at<double>(2,1) = pose.matrix()(6);
-      Rt.at<double>(3,1) = pose.matrix()(7);
-      Rt.at<double>(0,2) = pose.matrix()(8);
-      Rt.at<double>(1,2) = pose.matrix()(9);
-      Rt.at<double>(2,2) = pose.matrix()(10);
-      Rt.at<double>(3,2) = pose.matrix()(11);
-      Rt.at<double>(0,3) = pose.matrix()(12);
-      Rt.at<double>(1,3) = pose.matrix()(13);
-      Rt.at<double>(2,3) = pose.matrix()(14);
-      Rt.at<double>(3,3) = pose.matrix()(15);
-
-    //   cout << "pose by g-n: \n" << pose.matrix() << endl;
+    cout << "Rt by g-n: " << Rt << endl;
     Mat Rt_inv = Rt.inv();
-      return Rt_inv;
+    return Rt;
 }
 /// vertex and edges used in g2o ba
 class VertexPose : public g2o::BaseVertex<6, Sophus::SE3d> {
@@ -2570,4 +2172,487 @@ Mat bundleAdjustmentG2O(
   return Rt;
 }
 
+void find_features_matches_kaze(const Mat &prev_img, const Mat &curr_img,
+                        std::vector<KeyPoint> &keypoints_prev,
+                        std::vector<KeyPoint> &keypoints_curr,
+                        std::vector<DMatch> &matches) {
 
+  Mat descriptors_prev, descriptors_curr;
+  Ptr<FeatureDetector> detector = KAZE::create();
+  Ptr<DescriptorExtractor> descriptor = KAZE::create();
+  // Ptr<DescriptorMatcher> matcher = DescriptorMatcher::create("BruteForce-Hamming");
+  Ptr<DescriptorMatcher> matcher = DescriptorMatcher::create("FlannBased");
+  // cv::FlannBasedMatcher matcher = cv::FlannBasedMatcher(cv::makePtr<cv::flann::LshIndexParams>(12, 20, 2));
+  detector->detect(prev_img, keypoints_prev);
+  detector->detect(curr_img, keypoints_curr);
+  cout << "keypoints_prev.size() "<< keypoints_prev.size() << " keypoints_curr.size() " << keypoints_curr.size() << endl;
+  descriptor->compute(prev_img, keypoints_prev, descriptors_prev);
+  descriptor->compute(curr_img, keypoints_curr, descriptors_curr);
+  vector<DMatch> match;
+  vector<vector<DMatch>> knn_matches; 
+  descriptors_prev.convertTo(descriptors_prev, CV_32F);
+  descriptors_curr.convertTo(descriptors_curr, CV_32F);
+  matcher->knnMatch( descriptors_prev, descriptors_curr, knn_matches, 2);
+  const float ratio_thresh = 0.7f;
+  for (size_t i = 0; i < knn_matches.size(); i++){
+      if (knn_matches[i][0].distance < ratio_thresh * knn_matches[i][1].distance){
+          matches.push_back(knn_matches[i][0]);
+      }
+  }
+}
+
+void showMotion(
+  const Mat &prev_img, 
+  const Mat &curr_img, 
+  const Mat &prevgray, 
+  const Mat &gray, 
+  const Mat &flow){
+
+  namedWindow("flow", WINDOW_NORMAL);  
+  Mat motion2color;   
+  cvtColor(prev_img, prevgray, COLOR_BGR2GRAY);
+  cvtColor(curr_img, gray, COLOR_BGR2GRAY);
+  calcOpticalFlowFarneback(prevgray, gray, flow, 0.5, 3, 15, 3, 5, 1.2, 0); 
+  cout << flow.size() << endl;
+  motionToColor(flow, motion2color);  
+  imshow("flow", motion2color);
+
+//   if(waitKey(10)>=0)  
+//     break; 
+}
+
+void match_dir_points(
+  VecVector3d &pts_3d_eigen_new, 
+  VecVector2d &pts_2d_eigen_new, 
+  VecVector3d &pts_3d_eigen_nxt_new, 
+  const Mat &prevgray, 
+  const Mat &gray, 
+  const Mat &prev_depth, 
+  const Mat &curr_depth, 
+  const Mat &K,
+  Mat &grad_x, 
+  Mat &grad_y
+){
+    // Mat grad_x, grad_y, prevgrad_x, prevgrad_y;
+    Mat prevgrad_x, prevgrad_y;
+    cv::Sobel( prevgray, prevgrad_x, CV_16S, 1, 0, 3, 1, 0, BORDER_DEFAULT );
+    cv::Sobel( prevgray, prevgrad_y, CV_16S, 0, 1, 3, 1, 0, BORDER_DEFAULT );
+    cv::Sobel( gray, grad_x, CV_16S, 1, 0, 3, 1, 0, BORDER_DEFAULT );
+    cv::Sobel( gray, grad_y, CV_16S, 0, 1, 3, 1, 0, BORDER_DEFAULT );
+    for(int i=0; i<prevgrad_x.rows; i++){
+      for(int j=0; j<prevgrad_x.cols; j++){
+          ushort d = prev_depth.ptr<unsigned short>(i)[j];
+          ushort d_nxt = curr_depth.ptr<unsigned short>(i)[j];
+          // if(i == 41){
+              // cout << i << "," << j << " " << d_nxt << " " << grad_x.ptr<short>(i)[j] * grad_x.ptr<short>(i)[j] + grad_y.ptr<short>(i)[j] * grad_y.ptr<short>(i)[j] << " " << grad_x.ptr<short>(i)[j] << " " << grad_y.ptr<short>(i)[j] << endl;
+          //   }
+          if(abs(grad_x.ptr<short>(i)[j] * grad_x.ptr<short>(i)[j] + grad_y.ptr<short>(i)[j] * grad_y.ptr<short>(i)[j]) >= 6400){
+            // cout << "hi" << abs(grad_x.ptr<short>(i)[j]) << "hey"<< endl;
+            // cout << i << "," << j << " " << d_nxt << " " << prevgrad_x.ptr<short>(i)[j] * prevgrad_x.ptr<short>(i)[j] + prevgrad_y.ptr<short>(i)[j] * prevgrad_y.ptr<short>(i)[j] << " " << grad_x.ptr<short>(i)[j] * grad_x.ptr<short>(i)[j] + grad_y.ptr<short>(i)[j] * grad_y.ptr<short>(i)[j] << endl;
+            if (d == 0 || d_nxt == 0 || isnan(d) || isnan(d_nxt)){
+                continue;
+            }
+
+            // cout << "this is matches: " <<  index << endl;
+            float dd = d / 5000.0;
+            float dd_nxt = d_nxt / 5000.0;
+            // cout << i << "," << j << " " << dd_nxt << " " << d_nxt << endl;
+            Point2d p = pixel2cam(cv::Point2d(j, i), K);
+            pts_3d_eigen_new.push_back(Eigen::Vector3d(p.x*dd, p.y*dd, dd));
+            // cout << "(" << i << "," << j << ") ("  << p.x << "," << p.y << ")" << endl;
+            pts_2d_eigen_new.push_back(Eigen::Vector2d(j, i));
+            // pts_3d_eigen_nxt_new.push_back()
+          }
+      }
+    }
+  
+}
+void match_points(
+  vector<Point3f> &pts_3d, 
+  vector<Point2f> &pts_2d, 
+  vector<Point3f> &pts_3d_nxt, 
+  vector<KeyPoint> &keys1, 
+  vector<KeyPoint> &keys2,
+  vector<KeyPoint> &keypoints_prev, 
+  vector<KeyPoint> &keypoints_curr,
+  vector<Point2f> &points1, 
+  vector<Point2f> &points2, 
+  vector<DMatch> &matches,
+  const Mat &prev_depth, 
+  const Mat &curr_depth,
+  const Mat &K){
+
+  int index = 1;
+  cout << "match size " << matches.size() << endl;
+  for (DMatch m:matches) {
+    // cout << "(" << keypoints_prev[m.queryIdx].pt.x << "," << keypoints_prev[m.queryIdx].pt.y << ") (" << keypoints_curr[m.trainIdx].pt.x << "," << keypoints_curr[m.trainIdx].pt.y << ") " << endl;
+    ushort d = prev_depth.ptr<unsigned short>(int(keypoints_prev[m.queryIdx].pt.y))[int(keypoints_prev[m.queryIdx].pt.x)];
+    ushort d_nxt = curr_depth.ptr<unsigned short>(int(keypoints_curr[m.trainIdx].pt.y))[int(keypoints_curr[m.trainIdx].pt.x)];
+    // cout << "this is normal matches: " << index << " " << "depth: " << d << " depth_nxt: " << d_nxt << " " << isnan(d) << " " << isnan(d_nxt) << endl;
+    index += 1;
+    if (d == 0 || d_nxt == 0 || isnan(d) || isnan(d_nxt)){
+        // cout << "match " << index << " " << "depth: " << d << " depth_nxt: " << d_nxt << " " << isnan(d) << " " << isnan(d_nxt) << endl;
+        continue;
+    }
+    float dd = d / 5000.0;
+    float dd_nxt = d_nxt / 5000.0;
+    Point2d p1 = pixel2cam(keypoints_prev[m.queryIdx].pt, K);
+    Point2d p2 = pixel2cam(keypoints_curr[m.trainIdx].pt, K);
+    // cout << "(" << keypoints_prev[m.queryIdx].pt.x << "," << keypoints_prev[m.queryIdx].pt.y << ") (" << keypoints_curr[m.trainIdx].pt.x << "," << keypoints_curr[m.trainIdx].pt.y << ") " << dd << " " << dd_nxt << "(" << p1.x << "," << p1.y << ") (" << p2.x << "," << p2.y << ")" << endl;
+    keys1.push_back(keypoints_prev[m.queryIdx]);
+    keys2.push_back(keypoints_curr[m.trainIdx]);
+    points1.push_back(keypoints_prev[m.queryIdx].pt);
+    points2.push_back(keypoints_curr[m.trainIdx].pt);
+    pts_3d.push_back(Point3f(p1.x * dd, p1.y * dd, dd));
+    pts_3d_nxt.push_back(Point3f(p2.x * dd_nxt, p2.y * dd_nxt, dd_nxt));
+    pts_2d.push_back(keypoints_curr[m.trainIdx].pt);
+  }
+}
+
+
+
+  void pnp_append_rt(
+    const Mat &r, 
+    const Mat &t, 
+    vector<Mat> &Rts, 
+    const Mat &inliers,
+    vector<KeyPoint> &keypoints_prev,
+    vector<KeyPoint> &keypoints_curr,
+    vector<Point3f> &pts_3d){
+
+    Mat R;
+    cv::Rodrigues(r, R); // r为旋转向量形式，用Rodrigues公式转换为矩阵
+    cout << "R=" << endl << R << endl;
+    cout << "t=" << endl << t << endl;
+    Mat output;
+    hconcat(R, t, output);
+  
+    Mat Rt = Mat::eye(4,4,CV_64FC1);
+    Rt.at<double>(0,0) = R.at<double>(0,0);
+    Rt.at<double>(0,1) = R.at<double>(0,1);
+    Rt.at<double>(0,2) = R.at<double>(0,2);
+    Rt.at<double>(1,0) = R.at<double>(1,0);
+    Rt.at<double>(1,1) = R.at<double>(1,1);
+    Rt.at<double>(1,2) = R.at<double>(1,2);
+    Rt.at<double>(2,0) = R.at<double>(2,0);
+    Rt.at<double>(2,1) = R.at<double>(2,1);
+    Rt.at<double>(2,2) = R.at<double>(2,2);
+    Rt.at<double>(0,3) = t.at<double>(0,0);
+    Rt.at<double>(1,3) = t.at<double>(0,1);
+    Rt.at<double>(2,3) = t.at<double>(0,2);
+    cout << "Rt " << Rt << endl; 
+    Mat& prevRt = *Rts.rbegin();
+    cout << "prevRt " << prevRt << endl;
+    cout << "Rt " << Rt << endl; 
+    for (int i=0; i<inliers.rows; i++){
+      Mat m( 4,1, CV_64FC1);
+      m.at<double>(0,0) = keypoints_prev[inliers.at<int>(i,0)].pt.x;
+      m.at<double>(1,0) = keypoints_prev[inliers.at<int>(i,0)].pt.y;
+      m.at<double>(2,0) = pts_3d[i].z;
+      m.at<double>(3,0) = 1;
+      cout << "original " << m.t() << " projected " << (prevRt * Rt * m).t() << "  " << "actual " << keypoints_curr[inliers.at<int>(i,0)].pt<< endl;
+    }
+    Rts.push_back(prevRt * Rt);
+  }
+
+void BAg2o(
+  const VecVector3d &points_3d,
+  const VecVector2d &points_2d,
+  const Mat &K,
+  const string& filename, 
+  const vector<string>& timestamps,
+  vector<Mat> &Rts_ba,
+  Mat &Rt_ba,
+  VecVector3d pts_3d_eigen,
+  VecVector2d pts_2d_eigen){
+
+  cout << "calling bundle adjustment by g2o" << endl;
+  Sophus::SE3d pose_g2o;
+  chrono::steady_clock::time_point t1 = chrono::steady_clock::now();
+  Rt_ba = bundleAdjustmentG2O(pts_3d_eigen, pts_2d_eigen, K, pose_g2o, filename, timestamps);
+  Mat& prevRtba = *Rts_ba.rbegin();
+  Rts_ba.push_back(prevRtba * Rt_ba);
+  chrono::steady_clock::time_point t2 = chrono::steady_clock::now();
+  chrono::duration<double> time_used = chrono::duration_cast<chrono::duration<double>>(t2 - t1);
+  cout << "solve pnp by g2o cost time: " << time_used.count() << " seconds." << endl;
+   cout << "calling bundle adjustment by gauss newton" << endl;
+  }
+
+// void directPoseEstimation(
+//   cv::RNG rng, 
+//   int nPoints, 
+//   const Mat &prevgray, 
+//   const Mat &gray, 
+//   VecVector3d pixels_ref, 
+//   const vector<float> depth_ref, 
+//   const Mat &prev_depth,
+//   int border
+// ){
+//   double baseline = 0.573;
+// //   generate pixels in ref and load depth data
+//   for (int i = 0; i < nPoints; i++) {
+//       int x = rng.uniform(border, prevgray.cols - border);  // don't pick pixels close to border
+//       int y = rng.uniform(border, prevgray.rows - border);  // don't pick pixels close to border
+//       // int disparity = depth1.at<uchar>(y, x);
+//       // double depth = fx * baseline / disparity; // you know this is disparity to depth
+//       // double d = prev_depth.ptr<double>(y)[x];
+//       float d1 = prev_depth.at<float>(y,x)/5000.0;
+//       float d = prev_depth.ptr<float>(y)[x]/5000.0;
+//       if(d1 == 0 || isnan(d1)){
+//         continue;
+//       }
+//       depth_ref.push_back(d1);
+//       pixels_ref.push_back(Eigen::Vector2d(x, y));
+//   }
+
+//   Sophus::SE3d T_cur_ref;
+//   Mat Rt_baGauss = DirectPoseEstimationSingleLayer(gray, prevgray, pixels_ref, depth_ref, T_cur_ref);
+//   Mat Rt_baGauss = DirectPoseEstimationMultiLayer(prevgray, gray, pixels_ref, depth_ref, T_cur_ref);
+// }
+void writeResults( const string& filename, const vector<string>& timestamps, const vector<Mat>& Rt )
+{
+    CV_Assert( timestamps.size() == Rt.size() );
+
+    ofstream file( filename.c_str() );
+    if( !file.is_open() )
+        return;
+
+    cout.precision(4);
+    for( size_t i = 0; i < Rt.size(); i++ )
+    {
+        const Mat& Rt_curr = Rt[i];
+        if( Rt_curr.empty() )
+            continue;
+
+        CV_Assert( Rt_curr.type() == CV_64FC1 );
+
+        Mat R = Rt_curr(Rect(0,0,3,3)), rvec;
+        Rodrigues(R, rvec);
+        double alpha = norm( rvec );
+        if(alpha > DBL_MIN)
+            rvec = rvec / alpha;
+
+        double cos_alpha2 = std::cos(0.5 * alpha);
+        double sin_alpha2 = std::sin(0.5 * alpha);
+
+        rvec *= sin_alpha2;
+
+        CV_Assert( rvec.type() == CV_64FC1 );
+        // timestamp tx ty tz qx qy qz qw
+        file << timestamps[i] << " " << fixed
+             << Rt_curr.at<double>(0,3) << " " << Rt_curr.at<double>(1,3) << " " << Rt_curr.at<double>(2,3) << " "
+             << rvec.at<double>(0) << " " << rvec.at<double>(1) << " " << rvec.at<double>(2) << " " << cos_alpha2 << endl;
+
+    }
+    file.close();
+}
+void makecolorwheel(vector<Scalar> &colorwheel)  
+{  
+    int RY = 15;  
+    int YG = 6;  
+    int GC = 4;  
+    int CB = 11;  
+    int BM = 13;  
+    int MR = 6;  
+  
+    int i;  
+  
+    for (i = 0; i < RY; i++) colorwheel.push_back(Scalar(255,       255*i/RY,     0));  
+    for (i = 0; i < YG; i++) colorwheel.push_back(Scalar(255-255*i/YG, 255,       0));  
+    for (i = 0; i < GC; i++) colorwheel.push_back(Scalar(0,         255,      255*i/GC));  
+    for (i = 0; i < CB; i++) colorwheel.push_back(Scalar(0,         255-255*i/CB, 255));  
+    for (i = 0; i < BM; i++) colorwheel.push_back(Scalar(255*i/BM,      0,        255));  
+    for (i = 0; i < MR; i++) colorwheel.push_back(Scalar(255,       0,        255-255*i/MR));  
+} 
+
+void motionToColor(Mat flow, Mat &color)  
+{  
+    if (color.empty())  
+        color.create(flow.rows, flow.cols, CV_8UC3);  
+  
+    static vector<Scalar> colorwheel; //Scalar r,g,b  
+    if (colorwheel.empty())  
+        makecolorwheel(colorwheel);  
+  
+    // determine motion range:  
+    float maxrad = -1;  
+  
+    // Find max flow to normalize fx and fy  
+    for (int i= 0; i < flow.rows; ++i)   
+    {  
+        for (int j = 0; j < flow.cols; ++j)   
+        {  
+            Vec2f flow_at_point = flow.at<Vec2f>(i, j);  
+            float fx = flow_at_point[0];  
+            float fy = flow_at_point[1];  
+            if ((fabs(fx) >  UNKNOWN_FLOW_THRESH) || (fabs(fy) >  UNKNOWN_FLOW_THRESH))  
+                continue;  
+            float rad = sqrt(fx * fx + fy * fy);  
+            maxrad = maxrad > rad ? maxrad : rad;  
+        }  
+    }  
+  
+    for (int i= 0; i < flow.rows; ++i)   
+    {  
+        for (int j = 0; j < flow.cols; ++j)   
+        {  
+            uchar *data = color.data + color.step[0] * i + color.step[1] * j;  
+            Vec2f flow_at_point = flow.at<Vec2f>(i, j);  
+  
+            float fx = flow_at_point[0] / maxrad;  
+            float fy = flow_at_point[1] / maxrad;  
+            if ((fabs(fx) >  UNKNOWN_FLOW_THRESH) || (fabs(fy) >  UNKNOWN_FLOW_THRESH))  
+            {  
+                data[0] = data[1] = data[2] = 0;  
+                continue;  
+            }  
+            float rad = sqrt(fx * fx + fy * fy);  
+  
+            float angle = atan2(-fy, -fx) / CV_PI;  
+            float fk = (angle + 1.0) / 2.0 * (colorwheel.size()-1);  
+            int k0 = (int)fk;  
+            int k1 = (k0 + 1) % colorwheel.size();  
+            float f = fk - k0;  
+            //f = 0; // uncomment to see original color wheel  
+  
+            for (int b = 0; b < 3; b++)   
+            {  
+                float col0 = colorwheel[k0][b] / 255.0;  
+                float col1 = colorwheel[k1][b] / 255.0;  
+                float col = (1 - f) * col0 + f * col1;  
+                if (rad <= 1)  
+                    col = 1 - rad * (1 - col); // increase saturation with radius  
+                else  
+                    col *= .75; // out of range  
+                data[2 - b] = (int)(255.0 * col);  
+            }  
+        }  
+    }  
+}  
+static
+void computeProjectiveMatrixInv(const Mat& ksi, Mat& Rt)
+{
+    CV_Assert(ksi.size() == Size(1,6) && ksi.type() == CV_64FC1);
+
+// #ifdef HAVE_EIGEN3_HERE
+//     const double* ksi_ptr = ksi.ptr<const double>();
+//     Eigen::Matrix<double,4,4> twist, g;
+//     twist << 0.,          -ksi_ptr[2], ksi_ptr[1],  ksi_ptr[3],
+//              ksi_ptr[2],  0.,          -ksi_ptr[0], ksi_ptr[4],
+//              -ksi_ptr[1], ksi_ptr[0],  0,           ksi_ptr[5],
+//              0.,          0.,          0.,          0.;
+//     g = twist.exp();
+
+//     eigen2cv(g, Rt);
+// #else
+    // TODO: check computeProjectiveMatrix when there is not eigen library,
+    //       because it gives less accurate pose of the camera
+    Rt = Mat::eye(4, 4, CV_64FC1);
+    Mat R = Rt(Rect(0,0,3,3)); // 左上角x 左上角y width height
+    // cout << "Rt1" << Rt << R << endl;
+    // cout << "compute" << ksi.rowRange(0,3) << ksi.rowRange(0,2) << ksi << endl;
+    Mat rvec = ksi.rowRange(3,6);
+
+    Rodrigues(rvec, R);
+    // cout << "Rt2" << Rt << R << endl;
+    Rt.at<double>(0,3) = ksi.at<double>(0);
+    Rt.at<double>(1,3) = ksi.at<double>(1);
+    Rt.at<double>(2,3) = ksi.at<double>(2);
+    // cout << "Rt3" << Rt << endl;
+// #endif
+}
+static
+void computeProjectiveMatrix(const Mat& ksi, Mat& Rt)
+{
+    CV_Assert(ksi.size() == Size(1,6) && ksi.type() == CV_64FC1);
+
+// #ifdef HAVE_EIGEN3_HERE
+//     const double* ksi_ptr = ksi.ptr<const double>();
+//     Eigen::Matrix<double,4,4> twist, g;
+//     twist << 0.,          -ksi_ptr[2], ksi_ptr[1],  ksi_ptr[3],
+//              ksi_ptr[2],  0.,          -ksi_ptr[0], ksi_ptr[4],
+//              -ksi_ptr[1], ksi_ptr[0],  0,           ksi_ptr[5],
+//              0.,          0.,          0.,          0.;
+//     g = twist.exp();
+
+//     eigen2cv(g, Rt);
+// #else
+    // TODO: check computeProjectiveMatrix when there is not eigen library,
+    //       because it gives less accurate pose of the camera
+    Rt = Mat::eye(4, 4, CV_64FC1);
+
+    Mat R = Rt(Rect(0,0,3,3)); // 左上角x 左上角y width height
+    // cout << "Rt1" << Rt << R << endl;
+    // cout << "compute" << ksi.rowRange(0,3) << ksi.rowRange(0,2) << ksi << endl;
+    Mat rvec = ksi.rowRange(0,3);
+
+    Rodrigues(rvec, R);
+    // cout << "Rt2" << Rt << R << endl;
+    Rt.at<double>(0,3) = ksi.at<double>(3);
+    Rt.at<double>(1,3) = ksi.at<double>(4);
+    Rt.at<double>(2,3) = ksi.at<double>(5);
+    // cout << "Rt3" << Rt << endl;
+// #endif
+}
+inline float GetPixelValue(const cv::Mat &img, float x, float y) {
+    // boundary check
+    if (x < 0) x = 0;
+    if (y < 0) y = 0;
+    if (x >= img.cols) x = img.cols - 1;
+    if (y >= img.rows) y = img.rows - 1;
+    uchar *data = &img.data[int(y) * img.step + int(x)];
+    float xx = x - floor(x);
+    float yy = y - floor(y);
+    return float(
+        (1 - xx) * (1 - yy) * data[0] +
+        xx * (1 - yy) * data[1] +
+        (1 - xx) * yy * data[img.step] +
+        xx * yy * data[img.step + 1]
+    );
+}
+double Average(vector<double> v)
+{      double sum=0;
+       for(int i=0;i<v.size();i++)
+               sum+=v[i];
+       return sum/v.size();
+}
+// deviation
+double Deviation(vector<double> v, double ave)
+{
+       double E=0;
+       for(int i=0;i<v.size();i++){
+               E+=(v[i] - ave)*(v[i] - ave);
+       }
+       return sqrt(E/v.size());
+}
+
+void ransac_matching(
+  vector<DMatch> &match_inliers, 
+  vector<DMatch> &matches, 
+  const int minNumberMatchesAllowed,
+  vector<KeyPoint> &keypoints_prev, 
+  vector<KeyPoint> &keypoints_curr)
+  {
+
+    if (matches.size() > minNumberMatchesAllowed){
+        // Prepare data for cv::findHomography
+      std::vector<cv::Point2f> srcPoints(matches.size());
+      std::vector<cv::Point2f> dstPoints(matches.size());
+
+      // for (DMatch m:matches) {
+      for (size_t i = 0; i < matches.size(); i++){
+          srcPoints[i] = keypoints_prev[matches[i].queryIdx].pt;
+          dstPoints[i] = keypoints_curr[matches[i].trainIdx].pt;
+      }
+      std::vector<unsigned char> inliersMask(srcPoints.size());
+      Mat homography = cv::findHomography(srcPoints, dstPoints, RANSAC, 2,inliersMask, 2000, 0.995);
+      
+      for (size_t l=0; l<inliersMask.size(); l++){
+          if (inliersMask[l])
+              match_inliers.push_back(matches[l]);
+      }
+      cout << "inlier size " << match_inliers.size() << endl;
+    } else {
+      match_inliers = matches;
+    }
+}

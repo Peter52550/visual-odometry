@@ -67,7 +67,6 @@ void writeResults( const string& filename, const vector<string>& timestamps, con
             continue;
 
         CV_Assert( Rt_curr.type() == CV_64FC1 );
-
         Mat R = Rt_curr(Rect(0,0,3,3)), rvec;
         Rodrigues(R, rvec);
         double alpha = norm( rvec );
@@ -118,12 +117,12 @@ int main(int argc, char** argv)
     vector<Mat> Rts;
 
     const string filename = argv[1];
-    ifstream file( filename.c_str() );
+    ifstream file( filename.c_str() ); // 把string物件轉換成C語言形式的字串常數，不可任意更改
     if( !file.is_open() )
         return -1;
 
     char dlmrt = '/';
-    size_t pos = filename.rfind(dlmrt);
+    size_t pos = filename.rfind(dlmrt); // 用於搜索字符串中任何字符的最後出現。如果字符存在於字符串中，則它返回該字符在字符串中最後一次出現的索引，否則它將返回string::npos，它指示指針位於字符串的末尾
     string dirname = pos == string::npos ? "" : filename.substr(0, pos) + dlmrt;
 
     const int timestampLength = 17;
@@ -134,22 +133,19 @@ int main(int argc, char** argv)
           fy = 525.0f,
           cx = 319.5f,
           cy = 239.5f;
-    // float fx = 517.3f, // default
-    //      fy = 516.5f,
-    //      cx = 318.6f,
-    //      cy = 255.3f;
-    if(filename.find("freiburg1") != string::npos)
+    
+    // if(filename.find("freiburg1") != string::npos)
         setCameraMatrixFreiburg1(fx, fy, cx, cy);
-    if(filename.find("freiburg2") != string::npos)
-        setCameraMatrixFreiburg2(fx, fy, cx, cy);
-    Mat cameraMatrix = Mat::eye(3,3,CV_32FC1);
+    // if(filename.find("freiburg2") != string::npos)
+        // setCameraMatrixFreiburg2(fx, fy, cx, cy);
+    Mat cameraMatrix = Mat::eye(3,3,CV_32FC1); // cameramatrix is 32FC1 type
     {
         cameraMatrix.at<float>(0,0) = fx;
         cameraMatrix.at<float>(1,1) = fy;
         cameraMatrix.at<float>(0,2) = cx;
         cameraMatrix.at<float>(1,2) = cy;
     }
-
+    
     Ptr<OdometryFrame> frame_prev = Ptr<OdometryFrame>(new OdometryFrame()),
                            frame_curr = Ptr<OdometryFrame>(new OdometryFrame());
     Ptr<Odometry> odometry = Odometry::create(string(argv[3]) + "Odometry");
@@ -159,11 +155,9 @@ int main(int argc, char** argv)
         return -1;
     }
     odometry->setCameraMatrix(cameraMatrix);
-
     MyTickMeter gtm;
     int count = 0;
     for(int i = 0; !file.eof(); i++)
-    // for(int i = 0; i<; i++)
     {
         string str;
         std::getline(file, str);
@@ -192,9 +186,9 @@ int main(int argc, char** argv)
 
             // scale depth
             Mat depth_flt;
-            depth.convertTo(depth_flt, CV_32FC1, 1.f/5000.f);
+            depth.convertTo(depth_flt, CV_32FC1, 1.f/5000.f);  // depth type from 16UC1 to 32FC1
 #if !BILATERAL_FILTER
-            depth_flt.setTo(std::numeric_limits<float>::quiet_NaN(), depth == 0);
+            depth_flt.setTo(std::numeric_limits<float>::quiet_NaN(), depth == 0); // 當depth中的某個畫素值等於0的時候，就將depth_flt同樣的位置設定成NaN
             depth = depth_flt;
 #else
             tm_bilateral_filter.start();
@@ -219,16 +213,16 @@ int main(int argc, char** argv)
             
             Mat Rt;
             Mat prevframe;
-            
             if(!Rts.empty())
             {
-                cvtColor(frame_prev->image, prevframe, COLOR_GRAY2BGR);
+                cvtColor(frame_prev->image, prevframe, COLOR_GRAY2BGR); // frame->image type CV_8UC1, frame->depth type CV_32FC1
                 // cout << frame_curr->image << endl;
         //         cout << "======================================" << endl;
         
                 MyTickMeter tm;
                 tm.start();
                 gtm.start();
+                
                 bool res = odometry->compute(frame_curr, frame_prev, Rt);
                 
                 gtm.stop();
@@ -242,12 +236,14 @@ int main(int argc, char** argv)
                     Rt = Mat::eye(4,4,CV_64FC1);
             }
             if( Rts.empty() )
-                Rts.push_back(Mat::eye(4,4,CV_64FC1));
+                Rts.push_back(Mat::eye(4,4,CV_64FC1)); // Rts is full of Mat type 64FC1
             else
             {
                 Mat& prevRt = *Rts.rbegin();
+                cout << "prevRt " << *Rts.rbegin() << endl;
                 cout << "Rt " << Rt << endl;
                 Rts.push_back( prevRt * Rt );
+                cout << "Rt final " << *Rts.rbegin() << endl;
             }
             if(!frame_prev.empty())
                 frame_prev->release();

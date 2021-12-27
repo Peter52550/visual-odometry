@@ -89,96 +89,73 @@ const double sobelScale = 1./8.;
 int normalWinSize = 5;
 //int normalMethod = RgbdNormals::RGBD_NORMALS_METHOD_FALS;
 int normalMethod = RgbdNormals::RGBD_NORMALS_METHOD_LIYANG;
+
 typedef vector<Eigen::Vector2d, Eigen::aligned_allocator<Eigen::Vector2d>> VecVector2d;
 typedef vector<Eigen::Vector3d, Eigen::aligned_allocator<Eigen::Vector3d>> VecVector3d;
+typedef Eigen::Matrix<double, 6, 1> Vector6d;
+vector<int> nlevels{8};
+vector<int> patchSizes{31};
+vector<int> edgeThresholds = patchSizes;
 
+void ransac_matching(
+  vector<DMatch> &match_inliers, 
+  vector<DMatch> &matches, 
+  const int minNumberMatchesAllowed,
+  vector<KeyPoint> &keypoints_prev, 
+  vector<KeyPoint> &keypoints_curr)
+  {
 
-void find_features(const Mat &img_1, const Mat &img_2,
-                           std::vector<KeyPoint> &keypoints_1,
-			                  std::vector<KeyPoint> &keypoints_2,
-                           std::vector<DMatch> &matches,
-                           const Mat &img_3) {
+    if (matches.size() > minNumberMatchesAllowed){
+        // Prepare data for cv::findHomography
+      std::vector<cv::Point2f> srcPoints(matches.size());
+      std::vector<cv::Point2f> dstPoints(matches.size());
 
-   Mat descriptors_1, descriptors_2, descriptors_3, descriptors_4;
-   Ptr<FeatureDetector> detector = BRISK::create();
-   Ptr<DescriptorExtractor> descriptor = BRISK::create();
-   Ptr<FeatureDetector> detector2 = KAZE::create();
-   Ptr<DescriptorExtractor> descriptor2 = KAZE::create();
-   // Ptr<DescriptorMatcher> matcher = DescriptorMatcher::create("BruteForce-Hamming");
-   Ptr<DescriptorMatcher> matcher = DescriptorMatcher::create("FlannBased");
-   // cv::FlannBasedMatcher matcher = cv::FlannBasedMatcher(cv::makePtr<cv::flann::LshIndexParams>(12, 20, 2));
-   detector->detect(img_1, keypoints_1);
-   detector->detect(img_2, keypoints_2);
-   cout << "keypoints_1.size() "<< keypoints_1.size() << " keypoints_2.size() " << keypoints_2.size() << endl;
-   if(keypoints_1.size() == 0 || keypoints_2.size() == 0){
-     keypoints_1.clear();
-     keypoints_2.clear();
-     detector = KAZE::create();
-     descriptor = KAZE::create();
-     detector->detect(img_1, keypoints_1);
-    detector->detect(img_2, keypoints_2);
-   }
-   // if(keypoints_1.size() != 0 && keypoints_2.size() != 0){
+      // for (DMatch m:matches) {
+      for (size_t i = 0; i < matches.size(); i++){
+          srcPoints[i] = keypoints_prev[matches[i].queryIdx].pt;
+          dstPoints[i] = keypoints_curr[matches[i].trainIdx].pt;
+      }
+      std::vector<unsigned char> inliersMask(srcPoints.size());
+      Mat homography = cv::findHomography(srcPoints, dstPoints, RANSAC, 2,inliersMask, 2000, 0.995);
       
-      descriptor->compute(img_1, keypoints_1, descriptors_1);
-      descriptor->compute(img_2, keypoints_2, descriptors_2);
-   // }
-   // cout << "des1 " << descriptors_1  << "des2 " << descriptors_2 << endl;
-   int eee = descriptors_1.empty();
-   int ddd = descriptors_2.empty();
-   vector<DMatch> match;
-   vector<vector<DMatch>> knn_matches; 
-   descriptors_1.convertTo(descriptors_1, CV_32F);
-   descriptors_2.convertTo(descriptors_2, CV_32F);
-   matcher->knnMatch( descriptors_1, descriptors_2, knn_matches, 2);
+      for (size_t l=0; l<inliersMask.size(); l++){
+          if (inliersMask[l])
+              match_inliers.push_back(matches[l]);
+      }
+      cout << "inlier size " << match_inliers.size() << endl;
+    } else {
+      match_inliers = matches;
+    }
+}
+void find_feature_matches_orb(const Mat &img_1, const Mat &img_2,
+                              vector<KeyPoint> &keypoints_1,
+			                  vector<KeyPoint> &keypoints_2,
+                              vector<DMatch> &matches,
+                              int level) {
+
+    Mat descriptors_1, descriptors_2;
+    int nfeatures = 1000;
+    Ptr<ORB> detector = ORB::create(nfeatures);
+    detector->detectAndCompute(img_1, noArray(), keypoints_1, descriptors_1);
+    detector->detectAndCompute(img_2, noArray(), keypoints_2, descriptors_2);
+    Ptr<DescriptorMatcher> matcher = DescriptorMatcher::create("FlannBased");
+    matcher->clear();
+    vector<DMatch> match;
+    vector<vector<DMatch>> knn_matches; 
+    descriptors_1.convertTo(descriptors_1, CV_32F);
+    descriptors_2.convertTo(descriptors_2, CV_32F);
+    matcher->knnMatch( descriptors_1, descriptors_2, knn_matches, 2);
+    cout << "knn " << knn_matches.size() << " " << matches.size() << " " << descriptors_1.type() << " " << descriptors_2.type() << " " << img_1.type() << " " << img_2.type() << endl;
+    cout << "key " << matches.size() << " " << keypoints_1.size() << " " << keypoints_2.size() << endl;
     const float ratio_thresh = 0.7f;
-   //  std::vector<DMatch> good_matches;
-    for (size_t i = 0; i < knn_matches.size(); i++)
-    {
-        if (knn_matches[i][0].distance < ratio_thresh * knn_matches[i][1].distance)
-        {
-            matches.push_back(knn_matches[i][0]);
+    for (size_t i = 0; i < knn_matches.size(); i++){
+        if(knn_matches[i].size() >= 2){
+            if (knn_matches[i][0].distance < ratio_thresh * knn_matches[i][1].distance){
+                matches.push_back(knn_matches[i][0]);
+            }
         }
     }
- }
- void find_features2(const Mat &img_1, const Mat &img_2,
-                           std::vector<KeyPoint> &keypoints_1,
-			                  std::vector<KeyPoint> &keypoints_2,
-                           std::vector<DMatch> &matches,
-                           const Mat &img_3) {
-
-   Mat descriptors_1, descriptors_2, descriptors_3, descriptors_4;
-   Ptr<FeatureDetector> detector = KAZE::create();
-   Ptr<DescriptorExtractor> descriptor = KAZE::create();
-   // Ptr<DescriptorMatcher> matcher = DescriptorMatcher::create("BruteForce-Hamming");
-   Ptr<DescriptorMatcher> matcher = DescriptorMatcher::create("FlannBased");
-   // cv::FlannBasedMatcher matcher = cv::FlannBasedMatcher(cv::makePtr<cv::flann::LshIndexParams>(12, 20, 2));
-   detector->detect(img_1, keypoints_1);
-   detector->detect(img_2, keypoints_2);
-   cout << "keypoints_1.size() "<< keypoints_1.size() << " keypoints_2.size() " << keypoints_2.size() << endl;
-   // if(keypoints_1.size() != 0 && keypoints_2.size() != 0){
-      
-      descriptor->compute(img_1, keypoints_1, descriptors_1);
-      descriptor->compute(img_2, keypoints_2, descriptors_2);
-   // }
-   // cout << "des1 " << descriptors_1  << "des2 " << descriptors_2 << endl;
-   int eee = descriptors_1.empty();
-   int ddd = descriptors_2.empty();
-   vector<DMatch> match;
-   vector<vector<DMatch>> knn_matches; 
-   descriptors_1.convertTo(descriptors_1, CV_32F);
-   descriptors_2.convertTo(descriptors_2, CV_32F);
-   matcher->knnMatch( descriptors_1, descriptors_2, knn_matches, 2);
-    const float ratio_thresh = 0.7f;
-   //  std::vector<DMatch> good_matches;
-    for (size_t i = 0; i < knn_matches.size(); i++)
-    {
-        if (knn_matches[i][0].distance < ratio_thresh * knn_matches[i][1].distance)
-        {
-            matches.push_back(knn_matches[i][0]);
-        }
-    }
- }
+}
 
 double Average(vector<double> v)
 {      double sum=0;
@@ -187,7 +164,6 @@ double Average(vector<double> v)
        return sum/v.size();
        // check if average converges
 }
-//DEVIATION
 double Deviation(vector<double> v, double ave)
 {
        double E=0;
@@ -196,44 +172,6 @@ double Deviation(vector<double> v, double ave)
        }
        return sqrt(E/v.size());
 }
-void find_feature_matches(const Mat &img_1, const Mat &img_2,
-                           std::vector<KeyPoint> &keypoints_1,
-			                  std::vector<KeyPoint> &keypoints_2,
-                           std::vector<DMatch> &matches) {
-   Mat descriptors_1, descriptors_2, descriptors_3, descriptors_4;
-   Ptr<FeatureDetector> detector = ORB::create();
-   Ptr<DescriptorExtractor> descriptor = ORB::create();
-   Ptr<DescriptorMatcher> matcher = DescriptorMatcher::create("BruteForce-Hamming");
-   detector->detect(img_1, keypoints_1);
-   detector->detect(img_2, keypoints_2);
-//    cout << "find1" << endl;
-//    cout << "keypoints_1.size() "<< keypoints_1.size() << " keypoints_2.size() " << keypoints_2.size() << endl;
-    // descriptor->compute(img_1, keypoints_1, descriptors_1);
-    // descriptor->compute(img_2, keypoints_2, descriptors_2);
- }
- void find_feature_matches_another(const Mat &img_1, const Mat &img_2,
-                           std::vector<KeyPoint> &keypoints_1,
-			                  std::vector<KeyPoint> &keypoints_2,
-                           std::vector<DMatch> &matches
-                           ) {
-   Mat descriptors_1, descriptors_2, descriptors_3, descriptors_4;
-   Ptr<FeatureDetector> detector = AgastFeatureDetector::create();
-   Ptr<DescriptorExtractor> descriptor = AgastFeatureDetector::create();
-   Ptr<DescriptorMatcher> matcher = DescriptorMatcher::create("BruteForce-Hamming");
-   detector->detect(img_1, keypoints_1);
-   detector->detect(img_2, keypoints_2);
-//    cout << "find2" << endl;
-//    cout << "keypoints_1.size() "<< keypoints_1.size() << " keypoints_2.size() " << keypoints_2.size() << endl;
-   // if(keypoints_1.size() != 0 && keypoints_2.size() != 0){
-      for (int i=0; i< keypoints_1.size(); i++){
-         // cout << "keypoint1 " << keypoints_1[i].pt << "keypoint2 " << keypoints_2[i].pt << endl;
-      }
-    //   descriptor->compute(img_1, keypoints_1, descriptors_1);
-    //   descriptor->compute(img_2, keypoints_2, descriptors_2);
-   // }
-   int eee = descriptors_1.empty();
-   int ddd = descriptors_2.empty();
- }
 Point2d pixel2cam(const Point2d &p, const Mat &K) {
    return Point2d
      (
@@ -242,346 +180,175 @@ Point2d pixel2cam(const Point2d &p, const Mat &K) {
      );
  }
 double calc_residual(
-   const VecVector3d &points_3d,
-  const VecVector2d &points_2d,
-  Sophus::SE3d &pose,
-  const Mat &K,
-  vector<double>& residuals,
-  const Mat& resultRt,
-  int iter
+    const VecVector3d &points_3d,
+    const VecVector2d &points_2d,
+    Sophus::SE3d &pose,
+    const Mat &K,
+    vector<double>& residuals,
+    const Mat& resultRt
 ){
     cout << K << endl;
     cout << "resi " << resultRt << endl;
-   double fx = K.at<double>(0, 0);
-  double fy = K.at<double>(1, 1);
-  double cx = K.at<double>(0, 2);
-  double cy = K.at<double>(1, 2);
-  vector<double> res_std;
-  Eigen::Matrix<double, 4, 4> Rt;
+    double fx = K.at<double>(0, 0);
+    double fy = K.at<double>(1, 1);
+    double cx = K.at<double>(0, 2);
+    double cy = K.at<double>(1, 2);
+    vector<double> res_std;
+    Eigen::Matrix<double, 4, 4> Rt;
     cv2eigen(resultRt, Rt);
-cout << "resi2 " << Rt << endl;
-cout << points_3d.size() << endl;
-  for (int i=0; i<points_3d.size(); i++){
-    //   cout << points_3d[i].homogeneous().transpose() << "    " << (Rt * (points_3d[i].homogeneous())).transpose() << "    " << (Rt * (points_3d[i].homogeneous())).transpose().hnormalized() << endl;
-    Eigen::Vector3d pc = (Rt * (points_3d[i].homogeneous())).transpose().hnormalized();
-    
-    //  Eigen::Vector3d pc = pose * points_3d[i];
-     Eigen::Vector2d proj(fx * pc[0] / pc[2] + cx, fy * pc[1] / pc[2] + cy);
-     
-     Eigen::Vector2d error = points_2d[i] - proj;
-     
-     residuals.push_back(error.squaredNorm());
-      if (isnan(pc[2]) == false) {
-         res_std.push_back(error.squaredNorm());
-      }
-  }
-  double total = 0;
-  cout << residuals.size() << endl;
-  
-  for(int i=0; i<residuals.size(); i++){
-      total += residuals[i] * residuals[i];
-  }
+    cout << "resi2 " << Rt << endl;
+    cout << points_3d.size() << endl;
+    for (int i=0; i<points_3d.size(); i++){
+        //   cout << points_3d[i].homogeneous().transpose() << "    " << (Rt * (points_3d[i].homogeneous())).transpose() << "    " << (Rt * (points_3d[i].homogeneous())).transpose().hnormalized() << endl;
+        Eigen::Vector3d pc = (Rt * (points_3d[i].homogeneous())).transpose().hnormalized();
+        //  Eigen::Vector3d pc = pose * points_3d[i];
+        Eigen::Vector2d proj(fx * pc[0] / pc[2] + cx, fy * pc[1] / pc[2] + cy);
+        Eigen::Vector2d error = points_2d[i] - proj;
+        residuals.push_back(error.squaredNorm());
+        if (isnan(pc[2]) == false) {
+            res_std.push_back(error.squaredNorm());
+        }
+    }
+    double total = 0;
+    cout << residuals.size() << endl;
+    for(int i=0; i<residuals.size(); i++){
+        total += residuals[i] * residuals[i];
+    }
     cout << "total residual square " << total << endl;
-  double avg = Average(res_std); 
-  double std = Deviation(res_std,avg);
-  cout << "average " << avg << endl;
-  return std;
+    double avg = Average(res_std); 
+    double std = Deviation(res_std,avg);
+    cout << "average " << avg << endl;
+    return std;
 }
+void match_points(
+  vector<Point3f> &pts_3d, 
+  vector<Point2f> &pts_2d, 
+  vector<Point3f> &pts_3d_nxt, 
+  vector<KeyPoint> &keys1, 
+  vector<KeyPoint> &keys2,
+  vector<KeyPoint> &keypoints_prev, 
+  vector<KeyPoint> &keypoints_curr,
+  vector<Point2f> &points1, 
+  vector<Point2f> &points2, 
+  vector<DMatch> &matches,
+  const Mat &prev_depth, 
+  const Mat &curr_depth,
+  const Mat &K){
 
+  int index = 1;
+  cout << "match size " << matches.size() << endl;
+  for (DMatch m:matches) {
+    float d = prev_depth.ptr<float>(int(keypoints_prev[m.queryIdx].pt.y))[int(keypoints_prev[m.queryIdx].pt.x)];
+    float d_nxt = curr_depth.ptr<float>(int(keypoints_curr[m.trainIdx].pt.y))[int(keypoints_curr[m.trainIdx].pt.x)];
+    index += 1;
+    if (d == 0 || d_nxt == 0 || isnan(d) || isnan(d_nxt)){
+        continue;
+    }
+    float dd = d;
+    float dd_nxt = d_nxt;
+    Point2d p1 = pixel2cam(keypoints_prev[m.queryIdx].pt, K);
+    Point2d p2 = pixel2cam(keypoints_curr[m.trainIdx].pt, K);
+    // cout << "(" << keypoints_prev[m.queryIdx].pt.x << "," << keypoints_prev[m.queryIdx].pt.y << ") (" << keypoints_curr[m.trainIdx].pt.x << "," << keypoints_curr[m.trainIdx].pt.y << ") " << dd << " " << dd_nxt << "(" << p1.x << "," << p1.y << ") (" << p2.x << "," << p2.y << ")" << endl;
+    keys1.push_back(keypoints_prev[m.queryIdx]);
+    keys2.push_back(keypoints_curr[m.trainIdx]);
+    points1.push_back(keypoints_prev[m.queryIdx].pt);
+    points2.push_back(keypoints_curr[m.trainIdx].pt);
+    pts_3d.push_back(Point3f(p1.x * dd, p1.y * dd, dd));
+    pts_3d_nxt.push_back(Point3f(p2.x * dd_nxt, p2.y * dd_nxt, dd_nxt));
+    pts_2d.push_back(keypoints_curr[m.trainIdx].pt);
+  }
+}
 void calculatePnPInliers(const Mat& frame0,
                          const Mat& frame1,
-                         const Mat& depthF0,
-                         const Mat& depthF1,
+                         const Mat& depth0,
+                         const Mat& depth1,
                          vector<double>& weight,
-                        Sophus::SE3d& pose_gn,
-                        VecVector3d& pts_3d_eigen,
-                        VecVector2d& pts_2d_eigen,
-                        const Mat& resultRt,
-                        const Mat& K,
-                        int iter
+                         Sophus::SE3d& pose_gn,
+                         VecVector3d& pts_3d_eigen,
+                         VecVector2d& pts_2d_eigen,
+                         const Mat& resultRt,
+                         const Mat& K,
+                         int level
                          ){
-    Mat image, depth, image1, depth1, depth_flt, depth_flt1;
-    cvtColor(frame0, image1, COLOR_GRAY2BGR);
-    depth_flt1 = depthF0;
-    cvtColor(frame1, image, COLOR_GRAY2BGR);
     
-    // cout << frame0 << endl;
-    depth_flt = depthF1;
-    // cout << CV_16UC1 << " " << image.type() << " " << image1.type() << " " << depth.type() << " " << depth1.type() << endl;
-    // cout << depth_flt1 << endl;
-    depth1 = depth_flt1;
-    depth = depth_flt;
-    // exit(1);
-    // depth_flt.convertTo(depth, CV_16UC1, 1.f/1.f);
-    // depth_flt1.convertTo(depth1, CV_16UC1, 1.f/1.f);
-    // std::swap(depth1, depth);
-    // depth = depth_flt;
-    // depth1 = depth_flt1;
-    // cout << CV_16UC1 << " " << image.type() << " " << image1.type() << " " << depth.type() << " " << depth1.type() << endl;
-    // cout << "hi " << image.channels() << " " << image1.channels() << endl;
-    // CV_Assert(!image.empty());
-    CV_Assert(!depth.empty());
-    // CV_Assert(depth.type() == CV_16UC1);
-    // CV_Assert(!image1.empty());
+    CV_Assert(!depth0.empty());
     CV_Assert(!depth1.empty());
-    // CV_Assert(depth1.type() == CV_16UC1);
-    Mat prevgray, gray, flow, cflow;  
-    // cvtColor(frame0, prevgray, COLOR_BGR2GRAY);
-    // cvtColor(frame1, gray, COLOR_BGR2GRAY);
-    // cout << CV_16UC1 << " " << prevgray.type() << " " << gray.type() << " " << depth.type() << " " << depth1.type() << endl;
-    // cout << "hi " << prevgray.channels() << " " << gray.channels() << endl;
-    // std::swap(image1, image);  
     
-    std::vector<KeyPoint> keypoints_1, keypoints_2, key1, key2;
+    std::vector<KeyPoint> keypoints_prev, keypoints_curr, key_temp1, key_temp2;
+    Ptr<ORB> detector = ORB::create(1000);
+    detector->setNLevels(nlevels[level]);
+    detector->setEdgeThreshold(edgeThresholds[level]);
+    detector->setPatchSize(patchSizes[level]);
+    detector->detect(frame0, key_temp1);
+    detector->detect(frame1, key_temp2);
+    cout << nlevels[level] <<  " " <<  edgeThresholds[level] << " " << patchSizes[level] << " " << key_temp1.size() << " " << key_temp2.size() << " " << frame0.type() << " " << frame1.type() << endl;
     vector<DMatch> matches;
-    Ptr<FeatureDetector> detector = ORB::create();
-    // detector->detect(image1, key1);
-    // detector->detect(image, key2);
-    detector->detect(frame0, key1);
-    detector->detect(frame1, key2);
-
-    if(key1.size() == 0 || key2.size() == 0){
-            // find_feature_matches_another(image1, image, keypoints_1, keypoints_2, matches, image2);
-            find_feature_matches_another(frame0, frame1, keypoints_1, keypoints_2, matches);
-            cout << "第二個: " <<  "一共找到了" << keypoints_1.size() << "组匹配点" << endl;
-            if(keypoints_1.size() == 0 || keypoints_2.size() == 0){
-                keypoints_1.clear();
-                keypoints_2.clear();
-                find_features2(frame0, frame1, keypoints_1, keypoints_2, matches, frame0);
-                cout << "第三個: " <<  "一共找到了" << keypoints_1.size() << " " << keypoints_2.size() << " 组匹配点" << endl;
-                // Mat Rt_baGauss = Mat::eye(4,4,CV_64FC1);
-                // Mat& prevRtbaGauss = *Rts_ba.rbegin();
-                // cout << "prevRtBA " << prevRtbaGauss << endl;
-                // cout << "RtBA " << Rt_baGauss << endl; 
-                // Rts_ba.push_back(prevRtbaGauss * Rt_baGauss);
-                // cout << "no matching" << endl;
-                // timestamps.push_back( timestap );
-                // continue;
-            }
-        }
-        else{
-            // find_feature_matches(image1, image, keypoints_1, keypoints_2, matches, image2);
-            find_feature_matches(frame0, frame1, keypoints_1, keypoints_2, matches);
-            cout << "第一個: " <<"一共找到了" << keypoints_1.size() << "组匹配点" << endl;
-        }
-    // exit(1);
-    cout << "hi" << endl;
-    // keypoints_1.convertTo(keypoints_1, CV_32F);
-    vector<Point2f> pt1, pt2;
-    for (auto &kp: keypoints_1) pt1.push_back(kp.pt);
-    vector<uchar> status;
-    vector<float> error;
-    cout << "hey" << endl;
-    cv::calcOpticalFlowPyrLK(frame0, frame1, pt1, pt2, status, error);
-    cout << "ho" << endl;
-    // cv::calcOpticalFlowPyrLK(image1, image, pt1, pt2, status, error);
-    vector<Point2f> right_points_to_find;
-    vector<int> right_points_to_find_back_index;
-    for (unsigned int i=0; i<status.size(); i++) {
-        if (status[i] && error[i] < 20.0) {
-            right_points_to_find_back_index.push_back(i);
-            right_points_to_find.push_back(pt2[i]);
-        } else {
-            status[i] = 0; // a bad flow
-        }
-    }
-    cout << right_points_to_find.size() << endl;
-    Mat right_points_to_find_flat = Mat(right_points_to_find).reshape(1,right_points_to_find.size()); //flatten array
-    vector<Point2f> right_features; // detected features
-    std::vector<cv::KeyPoint>::iterator it;
-    for( it= keypoints_2.begin(); it!= keypoints_2.end();it++){
-        right_features.push_back(it->pt);
-    }
-    Mat right_features_flat = Mat(right_features).reshape(1,right_features.size());
-    BFMatcher matcher(NORM_L2);
-    vector<vector<DMatch>> nearest_neighbors;
-    if(right_points_to_find.size() > 10){
-              float dis = 2.0f;
-              int tot = 0;
-              int ii = 0;
-              while ((tot < 10 && right_points_to_find.size() > 10) || (tot == 0 && right_points_to_find.size() <= 10 ) ){
-                if(ii > 1){
-                  for(int h=0; h<nearest_neighbors.size(); h++){
-                    nearest_neighbors[h].clear();
-                  }
-                }
-                  matcher.radiusMatch(right_points_to_find_flat, right_features_flat, nearest_neighbors, dis);
-                  tot = 0;
-                  for(int h=0; h<nearest_neighbors.size(); h++){
-                    tot += nearest_neighbors[h].size();
-                  }
-                  dis = dis + 0.5f;
-                  ii += 1;
-              }
-              tot = 0;
-              for(int h=0; h<nearest_neighbors.size(); h++){
-                    tot += nearest_neighbors[h].size();
-              }
-              cout << "total " << tot << endl;
-              // Check that the found neighbors are unique (throw away neighbors
-              // that are too close together, as they may be confusing)
-              std::set<int> found_in_right_points; // for duplicate prevention
-              int ind = 0;
-              while(matches.size() == 0){
-                  
-                double r = 0.5 + ind * 0.05;
-                cout << "first " << matches.size() << " " << ind << " ratio " << r << endl;
-                for(int w=0; w<nearest_neighbors.size(); w++) {
-                    DMatch _m;
-                    // cout << "nearest_neighbors[i] " << nearest_neighbors[i].size() << endl;
-                    if(nearest_neighbors[w].size() == 1) {
-                    _m = nearest_neighbors[w][0]; // only one neighbor
-                    } else if(nearest_neighbors[w].size() > 1) {
-                        // 2 neighbors – check how close they are
-                        double ratio = nearest_neighbors[w][0].distance / nearest_neighbors[w][1].distance;
-                        if(ratio < r) { // not too close //0.38
-                        // take the closest (first) one
-                            _m = nearest_neighbors[w][0];
-                        }else { // too close – we cannot tell which is better
-                            continue; // did not pass ratio test – throw away
-                        }
-                    } else {
-                        continue; // no neighbors
-                    }
-                    // prevent duplicates
-                    if (found_in_right_points.find(_m.trainIdx) == found_in_right_points.end()) {
-                        // The found neighbor was not yet used:
-                        // We should match it with the original indexing
-                        // ofthe left point
-                        _m.queryIdx = right_points_to_find_back_index[_m.queryIdx];
-                        matches.push_back(_m); // add this match
-                        found_in_right_points.insert(_m.trainIdx);
-                    }
-                  
-                }
-                cout << found_in_right_points.size() << endl;
-                cout << "end " << matches.size() << " " << ind << " ratio " << r << endl;
-                if(ind < 20 && matches.size() == 0){
-                      matches.clear();
-                      ind += 1;
-                  }else{
-                    break;
-                  }
-              }
-        
-        }else {
-          // cout << "use matching" << endl;
-          // keypoints_1.clear();
-          // keypoints_2.clear();
-          // matches.clear();
-          // Mat Rt_baGauss = Mat::eye(4,4,CV_64FC1);r
-          // Mat& prevRtbaGauss = *Rts_ba.rbegin();
-          // cout << "prevRtBA " << prevRtbaGauss << endl;
-          // cout << "RtBA " << Rt_baGauss << endl; 
-          // Rts_ba.push_back(prevRtbaGauss * Rt_baGauss);
-          // cout << "no matching 2" << endl;
-          // timestamps.push_back( timestap );
-          // continue;
-          find_features2(frame0, frame1, keypoints_1, keypoints_2, matches, image);
-
-        }
-    if(matches.size() != 0){
-        cout<< "pruned " << matches.size() << " / " << nearest_neighbors.size() << " matches" << endl;
-    // Mat d1 = imread(depth1, IMREAD_UNCHANGED);       // 深度图为16位无符号数，单通道图像
-    // Mat K = (Mat_<double>(3, 3) << 517.3f, 0, 318.6f, 0, 516.5f, 255.3f, 0, 0, 1);
+    cout << matches.size() << endl;
+    keypoints_prev.clear();
+    keypoints_curr.clear();
+    find_feature_matches_orb(frame0, frame1, keypoints_prev, keypoints_curr, matches, level);
+    cout << "第一個: " <<  "一共找到了" << keypoints_prev.size() << " " << keypoints_curr.size() << "個關鍵點" << endl;
+    cout << "第一個: " << "一共找到了" << matches.size() << "组匹配点" << endl;
+    const int minNumberMatchesAllowed = 8;
+    std::vector<cv::DMatch> match_inliers;
+    ransac_matching(match_inliers, matches, minNumberMatchesAllowed, keypoints_prev, keypoints_curr);
+    
+    vector<KeyPoint> keys1, keys2;
     vector<Point3f> pts_3d;
     vector<Point2f> pts_2d;
     vector<Point3f> pts_3d_nxt;
-    int index = 1;
-    std::vector<KeyPoint> keys1, keys2;
-    std::vector<cv::Point2f> points1, points2;
-    for (DMatch m:matches) {
-        float d = depth1.ptr<float>(int(keypoints_1[m.queryIdx].pt.y))[int(keypoints_1[m.queryIdx].pt.x)];
-        float d_nxt = depth.ptr<float>(int(keypoints_2[m.trainIdx].pt.y))[int(keypoints_2[m.trainIdx].pt.x)];
-        // ushort d = depth1.at<double>(int(keypoints_1[m.queryIdx].pt.x),int(keypoints_1[m.queryIdx].pt.y));
-        // exit(1);
-        // cout << "original depth " << d << " " << depth1.at<float>(int(keypoints_1[m.queryIdx].pt.y),int(keypoints_1[m.queryIdx].pt.x)) << " " << int(keypoints_1[m.queryIdx].pt.y) << " " << int(keypoints_1[m.queryIdx].pt.x) << endl;
-        if (d == 0 || d_nxt == 0 || isnan(d) || isnan(d_nxt)){
-            continue;
-        }
-        float dd = d / 1.0;
-        // float dd_nxt = d_nxt / 1.0;
-        // cout << "orig d" << d << " " << dd << endl;
-        Point2d p1 = pixel2cam(keypoints_1[m.queryIdx].pt, K);
-        keys1.push_back(keypoints_1[m.queryIdx]);
-        keys2.push_back(keypoints_2[m.trainIdx]);
-        points1.push_back(keypoints_1[m.queryIdx].pt);
-        points2.push_back(keypoints_2[m.trainIdx].pt);
-        pts_3d.push_back(Point3f(p1.x * dd, p1.y * dd, dd));
-        // pts_3d_nxt.push_back(Point3f(p2.x * dd_nxt, p2.y * dd_nxt, dd_nxt));
-        pts_2d.push_back(keypoints_2[m.trainIdx].pt);
-        cout << dd << " keypoints_1[m.queryIdx].pt " << keypoints_1[m.queryIdx].pt << " keypoints_2[m.trainIdx].pt " << keypoints_2[m.trainIdx].pt << endl;        
-        index += 1;
-    }
+    vector<Point2f> points1, points2;
+
+    match_points(pts_3d, pts_2d, pts_3d_nxt, keys1, keys2, keypoints_prev, keypoints_curr, points1, points2, match_inliers, depth0, depth1, K);
     cout << "3d-2d pairs: " << pts_3d.size() << " " << pts_2d.size() << endl;
-    // exit(1);
-    if(pts_3d.size() != 0){
-                for (size_t i = 0; i < pts_3d.size(); ++i) {
+    
+    VecVector3d pts_3d_eigen_nxt;
+    for (size_t i = 0; i < pts_3d.size(); ++i) {
+        // cout << "vector3d " << Eigen::Vector3d(pts_3d[i].x, pts_3d[i].y, pts_3d[i].z) << "vector2d " << Eigen::Vector2d(pts_2d[i].x, pts_2d[i].y) << endl;
         pts_3d_eigen.push_back(Eigen::Vector3d(pts_3d[i].x, pts_3d[i].y, pts_3d[i].z));
+        pts_3d_eigen_nxt.push_back(Eigen::Vector3d(pts_3d_nxt[i].x, pts_3d_nxt[i].y, pts_3d_nxt[i].z));
         pts_2d_eigen.push_back(Eigen::Vector2d(pts_2d[i].x, pts_2d[i].y));
     }
-    bool b = false;
-    keypoints_1.clear();
-    keypoints_1 = keys1;
-    keypoints_2.clear();
-    keypoints_2 = keys2;
-    Mat r, t, inliers;
+    keypoints_prev.clear();
+    keypoints_prev = keys1;
+    keypoints_curr.clear();
+    keypoints_curr = keys2;
+    Mat r, t, inliers, Rt_ba;;
     cout << "3d-2d pairs: " << pts_3d.size() << " " << pts_2d.size() << endl;
-    // solvePnPRansac(pts_3d, pts_2d, K, Mat(), r, t, b, 1000, 6.0, 0.99, inliers, SOLVEPNP_ITERATIVE);
-    // Mat R;
-    // cv::Rodrigues(r, R);
-    Mat output;
-    // Mat Rt_ba;
-    // VecVector3d pts_3d_eigen;
-    // VecVector2d pts_2d_eigen;
-    cout << "3d-2d pairs: " << pts_3d.size() << " " << pts_2d.size() << endl;
-    // for (size_t i = 0; i < pts_3d.size(); ++i) {
-    //     pts_3d_eigen.push_back(Eigen::Vector3d(pts_3d[i].x, pts_3d[i].y, pts_3d[i].z));
-    //     pts_2d_eigen.push_back(Eigen::Vector2d(pts_2d[i].x, pts_2d[i].y));
-    // }
     int mode = 0; // 0=huber
     vector<double> residuals;
-
-    double res_std = calc_residual(pts_3d_eigen, pts_2d_eigen, pose_gn, K, residuals, resultRt, iter);
+    double res_std = calc_residual(pts_3d_eigen, pts_2d_eigen, pose_gn, K, residuals, resultRt);
     cout << "deviation: " << res_std << endl;
     double huber_k = 1.345 * res_std;
-    // vector<double> weight;
     if(mode == 0){
         for (int j=0; j<residuals.size(); j++){
             if(residuals[j] <= huber_k){
                 weight.push_back(1.0);
-                // cout << "weight " << 1.0 << endl;
             }else {
                 weight.push_back(huber_k/residuals[j]);
-                // cout << "weight " << huber_k/residuals[j] << endl;
             }
 
         }
     }else {
         for (int j=0; j<residuals.size(); j++){
             weight.push_back(0.0);
-            // cout << "weight " << 0.0 << endl;
         }
     }
-       }
-    
-    }
-    
-    
 }
+    
 
 static inline
 void setDefaultIterCounts(Mat& iterCounts)
 {
-    // iterCounts = Mat(Vec4i(7,7,7,10));
-    iterCounts = Mat(Vec<int,1>(10));
+    iterCounts = Mat(Vec4i(7,7,7,10));
+    // iterCounts = Mat(Vec<int,1>(10));
 }
 
 static inline
 void setDefaultMinGradientMagnitudes(Mat& minGradientMagnitudes)
 {
-    // minGradientMagnitudes = Mat(Vec4f(10,10,10,10));
-    minGradientMagnitudes = Mat(Vec<float,1>(10));
+    minGradientMagnitudes = Mat(Vec4f(10,10,10,10));
+    // minGradientMagnitudes = Mat(Vec<float,1>(10));
 }
 
 static
@@ -633,7 +400,7 @@ void checkMask(const Mat& mask, const Size& imageSize)
         if(mask.size() != imageSize)
             CV_Error(Error::StsBadSize, "Mask has to have the size equal to the image size.");
         if(mask.type() != CV_8UC1)
-            CV_Error(Error::StsBadSize, "Mask type has to be CV_8UC1.");
+            CV_Error(Error::StsBadSize, "Mask type has to be CV_8UC1."); // mask type 8UC1
     }
 }
 
@@ -647,7 +414,7 @@ void checkNormals(const Mat& normals, const Size& depthSize)
 }
 
 static
-void preparePyramidImage(const Mat& image, std::vector<Mat>& pyramidImage, size_t levelCount)
+void preparePyramidImage(const Mat& image, std::vector<Mat>& pyramidImage, size_t levelCount) // levelCount=4
 {
     if(!pyramidImage.empty())
     {
@@ -676,12 +443,13 @@ void preparePyramidDepth(const Mat& depth, std::vector<Mat>& pyramidDepth, size_
     }
     else
         buildPyramid(depth, pyramidDepth, (int)levelCount - 1);
+
 }
 
 static
 void preparePyramidMask(const Mat& mask, const std::vector<Mat>& pyramidDepth, float minDepth, float maxDepth,
                         const std::vector<Mat>& pyramidNormal,
-                        std::vector<Mat>& pyramidMask)
+                        std::vector<Mat>& pyramidMask) // minDepth=0, maxDepth=4
 {
     minDepth = std::max(0.f, minDepth);
 
@@ -704,28 +472,22 @@ void preparePyramidMask(const Mat& mask, const std::vector<Mat>& pyramidDepth, f
         else
             validMask = mask.clone();
 
-        //cout << "liyang test" << validMask << endl;
-        //exit(1);
         buildPyramid(validMask, pyramidMask, (int)pyramidDepth.size() - 1);
-        // cout << pyramidMask.size() << " " << mask.size() << " " << mask.empty() << " " << pyramidMask.empty() << endl;
-        for(size_t i = 0; i < pyramidMask.size(); i++)
+        for(size_t i = 0; i < pyramidMask.size(); i++) // pyramidMask size=4
         {
             Mat levelDepth = pyramidDepth[i].clone();
-            // cout << "checksize " << pyramidDepth[i].size() << " " << pyramidMask[i].size() << endl;
             patchNaNs(levelDepth, 0);
-            // cout << minDepth << " " << maxDepth << endl;
             Mat& levelMask = pyramidMask[i];
-            levelMask &= (levelDepth > minDepth) & (levelDepth < maxDepth);
-
-            if(!pyramidNormal.empty())
+            levelMask &= (levelDepth > minDepth) & (levelDepth < maxDepth); // correct
+            // levelMask &= (levelDepth > minDepth); // fix
+            if(!pyramidNormal.empty()) // pyranmidNormal type 32FC3
             {
                 CV_Assert(pyramidNormal[i].type() == CV_32FC3);
                 CV_Assert(pyramidNormal[i].size() == pyramidDepth[i].size());
                 Mat levelNormal = pyramidNormal[i].clone();
-                
                 Mat validNormalMask = levelNormal == levelNormal; // otherwise it's Nan
-                // cout << "normalsize " << pyramidNormal[i].size() << validNormalMask.size() << endl; 
                 CV_Assert(validNormalMask.type() == CV_8UC3);
+                // cout << pyramidNormal[i].type() << " " << levelNormal.type() << " " << validNormalMask.type() << endl;
 
                 std::vector<Mat> channelMasks;
                 split(validNormalMask, channelMasks);
@@ -748,15 +510,14 @@ void preparePyramidCloud(const std::vector<Mat>& pyramidDepth, const Mat& camera
         for(size_t i = 0; i < pyramidDepth.size(); i++)
         {
             CV_Assert(pyramidCloud[i].size() == pyramidDepth[i].size());
-            CV_Assert(pyramidCloud[i].type() == CV_32FC3);
+            CV_Assert(pyramidCloud[i].type() == CV_32FC3); // pyramidCloud type 32FC3
         }
     }
     else
     {
         std::vector<Mat> pyramidCameraMatrix;
-        buildPyramidCameraMatrix(cameraMatrix, (int)pyramidDepth.size(), pyramidCameraMatrix);
-
-        pyramidCloud.resize(pyramidDepth.size());
+        buildPyramidCameraMatrix(cameraMatrix, (int)pyramidDepth.size(), pyramidCameraMatrix); // size: cloud=0 depth=4
+        pyramidCloud.resize(pyramidDepth.size()); // size: cloud=4 depth=4
         for(size_t i = 0; i < pyramidDepth.size(); i++)
         {
             Mat cloud;
@@ -777,7 +538,7 @@ void preparePyramidSobel(const std::vector<Mat>& pyramidImage, int dx, int dy, s
         for(size_t i = 0; i < pyramidSobel.size(); i++)
         {
             CV_Assert(pyramidSobel[i].size() == pyramidImage[i].size());
-            CV_Assert(pyramidSobel[i].type() == CV_16SC1);
+            CV_Assert(pyramidSobel[i].type() == CV_16SC1); // pyramidSobel type 16SC1
         }
     }
     else
@@ -786,10 +547,8 @@ void preparePyramidSobel(const std::vector<Mat>& pyramidImage, int dx, int dy, s
         
         for(size_t i = 0; i < pyramidImage.size(); i++)
         {
-            Sobel(pyramidImage[i], pyramidSobel[i], CV_16S, dx, dy, sobelSize);
-            // cout << "sobelimage " << pyramidImage.size() << " " << pyramidSobel[i].size() << endl;
+            Sobel(pyramidImage[i], pyramidSobel[i], CV_16S, dx, dy, sobelSize); // sobelSize=3
         }
-        // cout << pyramidSobel.size() << " ========" << endl;
     }
 }
 
@@ -829,40 +588,40 @@ void preparePyramidTexturedMask(const std::vector<Mat>& pyramid_dI_dx, const std
     {
         if(pyramidTexturedMask.size() != pyramid_dI_dx.size())
             CV_Error(Error::StsBadSize, "Incorrect size of pyramidTexturedMask.");
-
         for(size_t i = 0; i < pyramidTexturedMask.size(); i++)
         {
             CV_Assert(pyramidTexturedMask[i].size() == pyramid_dI_dx[i].size());
-            CV_Assert(pyramidTexturedMask[i].type() == CV_8UC1);
+            CV_Assert(pyramidTexturedMask[i].type() == CV_8UC1); // pyramidTexturedMask type 8UC1
         }
     }
     else
     {
-        const float sobelScale2_inv = 1.f / (float)(sobelScale * sobelScale); //sobelscale=1/8
+        const float sobelScale2_inv = 1.f / (float)(sobelScale * sobelScale); //sobelscale=1/8, sobelScale2_inv=64
         pyramidTexturedMask.resize(pyramid_dI_dx.size());
         for(size_t i = 0; i < pyramidTexturedMask.size(); i++)
         {
-            const float minScaledGradMagnitude2 = minGradMagnitudes[i] * minGradMagnitudes[i] * sobelScale2_inv;
-            const Mat& dIdx = pyramid_dI_dx[i];
+            const float minScaledGradMagnitude2 = minGradMagnitudes[i] * minGradMagnitudes[i] * sobelScale2_inv; // 6400
+            const Mat& dIdx = pyramid_dI_dx[i]; // // pyramid_dI_dx type 16SC1
             const Mat& dIdy = pyramid_dI_dy[i];
 
             Mat texturedMask(dIdx.size(), CV_8UC1, Scalar(0));
-
             for(int y = 0; y < dIdx.rows; y++)
             {
-                const short *dIdx_row = dIdx.ptr<short>(y);
+                
+                const short *dIdx_row = dIdx.ptr<short>(y); // unsigned char 1 byte, unsigned short 2 Bytes, int 4 bytes, float 4 bytes, double 4 bytes
                 const short *dIdy_row = dIdy.ptr<short>(y);
                 uchar *texturedMask_row = texturedMask.ptr<uchar>(y);
                 for(int x = 0; x < dIdx.cols; x++)
                 {
+                    // cout << dIdx_row[x] * dIdx_row[x] + dIdy_row[x] * dIdy_row[x] << " " << static_cast<float>(dIdx_row[x] * dIdx_row[x] + dIdy_row[x] * dIdy_row[x]) << " " << sizeof(static_cast<float>(dIdx_row[x] * dIdx_row[x] + dIdy_row[x] * dIdy_row[x])) << " " << sizeof(dIdx_row[x] * dIdx_row[x] + dIdy_row[x] * dIdy_row[x]) << endl;
                     float magnitude2 = static_cast<float>(dIdx_row[x] * dIdx_row[x] + dIdy_row[x] * dIdy_row[x]);
                     if(magnitude2 >= minScaledGradMagnitude2)
                         texturedMask_row[x] = 255;
                 }
             }
-            pyramidTexturedMask[i] = texturedMask & pyramidMask[i];
 
-            randomSubsetOfMask(pyramidTexturedMask[i], (float)maxPointsPart);
+            pyramidTexturedMask[i] = texturedMask & pyramidMask[i];
+            randomSubsetOfMask(pyramidTexturedMask[i], (float)maxPointsPart); // maxPointsPart = 0.07 fix
         }
     }
 }
@@ -998,7 +757,7 @@ void computeProjectiveMatrix(const Mat& ksi, Mat& Rt)
     Rt = Mat::eye(4, 4, CV_64FC1);
 
     Mat R = Rt(Rect(0,0,3,3)); // 左上角x 左上角y width height
-    cout << "Rt1" << Rt << R << endl;
+    // cout << "Rt1" << Rt << R << endl;
     // cout << "compute" << ksi.rowRange(0,3) << ksi.rowRange(0,2) << ksi << endl;
     Mat rvec = ksi.rowRange(0,3);
 
@@ -1079,7 +838,8 @@ void computeCorresps(const Mat& K, const Mat& K_inv, const Mat& Rt,
                     if(r.contains(Point(u0,v0)))
                     {
                         float d0 = depth0.at<float>(v0,u0);
-                        if(validMask0.at<uchar>(v0, u0) && std::abs(transformed_d1 - d0) <= maxDepthDiff)
+                        if(validMask0.at<uchar>(v0, u0) && std::abs(transformed_d1 - d0) <= maxDepthDiff) 
+                        // if(validMask0.at<uchar>(v0, u0)) // fix
                         {
                             CV_DbgAssert(!cvIsNaN(d0));
                             Vec2s& c = corresps.at<Vec2s>(v0,u0);
@@ -1116,8 +876,10 @@ void computeCorresps(const Mat& K, const Mat& K_inv, const Mat& Rt,
                 corresps_ptr[i++] = Vec4i(u0,v0,c[0],c[1]);
         }
     }
+    cout << "match-dir-points " << correspCount << endl;
 }
-
+// if(v1 < 40)
+//     cout << v1 << "," << u1 << " " << d1 << " " << v0 << "," << u0 << " !!!!" << endl;
 static inline
 void calcRgbdEquationCoeffs(double* C, double dIdx, double dIdy, const Point3f& p3d, double fx, double fy)
 {
@@ -1125,13 +887,14 @@ void calcRgbdEquationCoeffs(double* C, double dIdx, double dIdy, const Point3f& 
            v0 = dIdx * fx * invz,
            v1 = dIdy * fy * invz,
            v2 = -(v0 * p3d.x + v1 * p3d.y) * invz;
-
+    // cout << dIdx << " " << fx << " " << invz << " " << v0 << endl;
     C[0] = -p3d.z * v1 + p3d.y * v2;
     C[1] =  p3d.z * v0 - p3d.x * v2;
     C[2] = -p3d.y * v0 + p3d.x * v1;
     C[3] = v0;
     C[4] = v1;
     C[5] = v2;
+    // cout << C[0] << " " << C[1] << " " << C[2] << " " << C[3] << " " << C[4] << " " << C[5] << endl;
 }
 
 static inline
@@ -1226,6 +989,7 @@ void calcRgbdLsmMatrices(const Mat& image0, const Mat& cloud0, const Mat& Rt,
 	 //exit(1);
          sigma += diffs_ptr[correspIndex] * diffs_ptr[correspIndex];
     }
+    // cout << "sigma: " << sigma << endl;
     sigma = std::sqrt(sigma/correspsCount);
 
     std::vector<double> A_buf(transformDim);
@@ -1244,23 +1008,32 @@ void calcRgbdLsmMatrices(const Mat& image0, const Mat& cloud0, const Mat& Rt,
 
          const Point3f& p0 = cloud0.at<Point3f>(v0,u0);
          Point3f tp0;
+        //  cout << p0.x << " " << p0.y << " " << p0.z << endl;
          tp0.x = (float)(p0.x * Rt_ptr[0] + p0.y * Rt_ptr[1] + p0.z * Rt_ptr[2] + Rt_ptr[3]);
          tp0.y = (float)(p0.x * Rt_ptr[4] + p0.y * Rt_ptr[5] + p0.z * Rt_ptr[6] + Rt_ptr[7]);
          tp0.z = (float)(p0.x * Rt_ptr[8] + p0.y * Rt_ptr[9] + p0.z * Rt_ptr[10] + Rt_ptr[11]);
 
-         func(A_ptr,
-              w_sobelScale * dI_dx1.at<short int>(v1,u1),
-              w_sobelScale * dI_dy1.at<short int>(v1,u1),
+        //  func(A_ptr,
+        //       w_sobelScale * dI_dx1.at<short int>(v1,u1),
+        //       w_sobelScale * dI_dy1.at<short int>(v1,u1),
+        //       tp0, fx, fy);
+        // cout << dI_dx1.at<short int>(v1,u1) << " " << dI_dy1.at<short int>(v1,u1) << endl;
+        func(A_ptr,
+              dI_dx1.at<short int>(v1,u1),
+              dI_dy1.at<short int>(v1,u1),
               tp0, fx, fy);
-
         for(int y = 0; y < transformDim; y++)
         {
             double* AtA_ptr = AtA.ptr<double>(y);
-            for(int x = y; x < transformDim; x++)
+            for(int x = y; x < transformDim; x++){
                 AtA_ptr[x] += A_ptr[y] * A_ptr[x];
-
-            AtB_ptr[y] += A_ptr[y] * w * diffs_ptr[correspIndex];
+                // cout << A_ptr[y]  << " " << A_ptr[x] << " " << A_ptr[y] * A_ptr[x] << endl;
+            }
+            // cout << "AtA_ptr " << AtA << endl;
+            // AtB_ptr[y] += A_ptr[y] * w * diffs_ptr[correspIndex];
+            AtB_ptr[y] += A_ptr[y] * diffs_ptr[correspIndex];
         }
+        // cout << "AtA " << AtA << endl;
     }
 
     for(int y = 0; y < transformDim; y++)
@@ -1343,11 +1116,78 @@ void calcICPLsmMatrices(const Mat& cloud0, const Mat& Rt,
             AtA.at<double>(x,y) = AtA.at<double>(y,x);
 }
 
+void calcPnPLsmMatrices(
+    const Mat& K,
+    const Mat& resultRt,
+    Sophus::SE3d& pose,
+    VecVector3d& pts_3d_eigen,
+    VecVector2d& pts_2d_eigen,
+    Eigen::Matrix<double, 6, 6>& H, 
+    Vector6d& b,
+    double& cost,
+    double& lastCost,
+    vector<double>& weight,
+    Mat& AtA_pnp,
+    Mat& AtB_pnp
+){
+
+    double fx = K.at<double>(0, 0);
+    double fy = K.at<double>(1, 1);
+    double cx = K.at<double>(0, 2);
+    double cy = K.at<double>(1, 2);
+    Eigen::Matrix<double, 4, 4> Rt;
+    cv2eigen(resultRt, Rt);
+    cout << "Rt " << Rt << endl;
+    if(pts_3d_eigen.size() > 0){
+        for (int i = 0; i < pts_3d_eigen.size(); i++) {
+            // cout << "pnp " << Rt << endl;
+            // cout << (Rt * (pts_3d_eigen[i].homogeneous())).transpose().hnormalized().rows() << " " << (Rt * (pts_3d_eigen[i].homogeneous())).transpose().hnormalized().cols() << endl;
+            // cout << (Rt * (pts_3d_eigen[i].homogeneous())).transpose().hnormalized() << endl;
+            // for(int l=0; l<4; l++){
+            //     cout << (pts_3d_eigen[i].homogeneous()).transpose()[l] << " ";
+            // }
+            // cout << endl;
+            // Eigen::Vector3d pc = (Rt * (pts_3d_eigen[i].homogeneous())).transpose().hnormalized();
+            Eigen::Vector3d pc = pose * pts_3d_eigen[i];
+            double inv_z = 1.0 / pc[2];
+            double inv_z2 = inv_z * inv_z;
+            Eigen::Vector2d proj(fx * pc[0] / pc[2] + cx, fy * pc[1] / pc[2] + cy);
+            Eigen::Vector2d e = pts_2d_eigen[i] - proj;
+            // "[" << pts_3d_eigen[i][0] << ", " << pts_3d_eigen[i][1] << "]" <<"[" << pc[0] << ", " << pc[1] << "]" <<
+            // cout <<  "[" << pts_2d_eigen[i][0] << ", " << pts_2d_eigen[i][1] << "]" << " [" << proj[0] << ", " << proj[1] << "]" << endl;
+            // cout << fx << " " << inv_z << " " << inv_z2 << " " << fx << " " << fy << endl;
+            cost += e.squaredNorm();
+            Eigen::Matrix<double, 2, 6> J;
+            J << fx * pc[0] * pc[1] * inv_z2,
+                -fx - fx * pc[0] * pc[0] * inv_z2,
+                fx * pc[1] * inv_z,
+                -fx * inv_z,
+                0,
+                fx * pc[0] * inv_z2,
+                fy + fy * pc[1] * pc[1] * inv_z2,
+                -fy * pc[0] * pc[1] * inv_z2,
+                -fy * pc[0] * inv_z,
+                0,
+                -fy * inv_z,
+                fy * pc[1] * inv_z2;
+                
+            // cout << "J " << J << endl;
+            // cout << endl;
+            H += J.transpose() * (J * weight[i]);
+            b += -J.transpose() * (e * weight[i]);
+            // cout << J << endl;
+            // cout << weight[i] << " " << e << endl;
+        }
+        cout << "cost: " << cost << " last cost: " << lastCost << endl;
+    }
+
+    
+}
 static
 bool solveSystem(const Mat& AtA, const Mat& AtB, double detThreshold, Mat& x)
 {
     double det = determinant(AtA);
-    cout << "solve system " << det << " " << AtA << endl;
+    // cout << "solve system " << det << " " << AtA << endl;
     if(fabs (det) < detThreshold || cvIsNaN(det) || cvIsInf(det)) // fabs: double型態絕對值
         return false;
 
@@ -1378,11 +1218,13 @@ bool RGBDICPOdometryImpl(Mat& Rt, const Mat& initRt,
                          double maxTranslation, double maxRotation,
                          int method, int transfromType)
 {
-    cout << maxDepthDiff  << " " << maxTranslation << " " << maxRotation << " "  << method  << endl; // 0.07 0.15 15 3
+    // cout << maxDepthDiff  << " " << maxTranslation << " " << maxRotation << " "  << method  << endl; // 0.07 0.15 15 3
     // for (int i=0; i<iterCounts.size(); i++) {
     //     cout << i << ":" << iterCounts[i] << endl;
     // }
     // cout << "RGBDICPOdometryImpl " << srcFrame->depth.type() << " " << dstFrame->depth.type() << endl;
+    // iterCounts 7 7 7 10
+
     int transformDim = -1;
     CalcRgbdEquationCoeffsPtr rgbdEquationFuncPtr = 0;
     CalcICPEquationCoeffsPtr icpEquationFuncPtr = 0;
@@ -1392,19 +1234,19 @@ bool RGBDICPOdometryImpl(Mat& Rt, const Mat& initRt,
         transformDim = 6;
         rgbdEquationFuncPtr = calcRgbdEquationCoeffs;
         icpEquationFuncPtr = calcICPEquationCoeffs;
-        // cout << "rigid" << rgbdEquationFuncPtr << " " << icpEquationFuncPtr << endl; // 1 1
+        // cout << "rigid" << rgbdEquationFuncPtr << " " << icpEquationFuncPtr << calcRgbdEquationCoeffs << calcICPEquationCoeffs << endl; // 1 1
         break;
     case Odometry::ROTATION:
         transformDim = 3;
         rgbdEquationFuncPtr = calcRgbdEquationCoeffsRotation;
         icpEquationFuncPtr = calcICPEquationCoeffsRotation;
-        // cout << "rotation" << rgbdEquationFuncPtr << " " << icpEquationFuncPtr << endl;
+        cout << "rotation" << rgbdEquationFuncPtr << " " << icpEquationFuncPtr << endl;
         break;
     case Odometry::TRANSLATION:
         transformDim = 3;
         rgbdEquationFuncPtr = calcRgbdEquationCoeffsTranslation;
         icpEquationFuncPtr = calcICPEquationCoeffsTranslation;
-        // cout << "translation" << rgbdEquationFuncPtr << " " << icpEquationFuncPtr << endl;
+        cout << "translation" << rgbdEquationFuncPtr << " " << icpEquationFuncPtr << endl;
         break;
     default:
         CV_Error(Error::StsBadArg, "Incorrect transformation type");
@@ -1416,17 +1258,13 @@ bool RGBDICPOdometryImpl(Mat& Rt, const Mat& initRt,
 
     std::vector<Mat> pyramidCameraMatrix;
     
-    buildPyramidCameraMatrix(cameraMatrix, (int)iterCounts.size(), pyramidCameraMatrix); // count = 4
+    buildPyramidCameraMatrix(cameraMatrix, (int)iterCounts.size(), pyramidCameraMatrix); // iterCounts.size() = 4
     
     Mat resultRt = initRt.empty() ? Mat::eye(4,4,CV_64FC1) : initRt.clone();
     Mat currRt, ksi;
-    // cout << "liyang test" << resultRt << endl;
 
     Mat resultRtPnP = initRt.empty() ? Mat::eye(4,4,CV_64FC1) : initRt.clone();
     Mat currRtPnP;
-    for(int i=0; i<dstFrame->pyramidTexturedMask.size(); i++){
-        // cout << dstFrame->pyramidTexturedMask[i].size() << " " << dstFrame->pyramidNormalsMask[i].size() << endl;
-    }
     //cout << "liyang test" << srcFrame->pyramidDepth[1] << endl;
     //cout << "liyang test" << srcFrame->pyramidMask[1] << endl;
     //exit(1);
@@ -1435,7 +1273,7 @@ bool RGBDICPOdometryImpl(Mat& Rt, const Mat& initRt,
     Sophus::SE3d pose;
     for(int level = (int)iterCounts.size() - 1; level >= 0; level--) // 3 2 1 0
     {
-        cout << "level: " << level << " " << pyramidCameraMatrix[level] << endl;
+        // cout << "level: " << level << " " << pyramidCameraMatrix[level] << endl;
         const Mat& levelCameraMatrix = pyramidCameraMatrix[level];
         const Mat& levelCameraMatrix_inv = levelCameraMatrix.inv(DECOMP_SVD);
         const Mat& srcLevelDepth = srcFrame->pyramidDepth[level];
@@ -1447,6 +1285,8 @@ bool RGBDICPOdometryImpl(Mat& Rt, const Mat& initRt,
         const double determinantThreshold = 1e-6;
 
         Mat AtA_rgbd, AtB_rgbd, AtA_icp, AtB_icp;
+        Mat AtA_pnp(cv::Size(6, 6), AtA_rgbd.type());
+        Mat AtB_pnp(cv::Size(1, 6), AtB_rgbd.type());
         Mat corresps_rgbd, corresps_icp;
 
         vector<double> weight;
@@ -1455,46 +1295,38 @@ bool RGBDICPOdometryImpl(Mat& Rt, const Mat& initRt,
         VecVector3d pts_3d_eigen;
         VecVector2d pts_2d_eigen;
         // Mat K = (Mat_<double>(3, 3) << 517.3f, 0, 318.6f, 0, 516.5f, 255.3f, 0, 0, 1);
-        typedef Eigen::Matrix<double, 6, 1> Vector6d;
-        Eigen::Matrix<double, 6, 6> H = Eigen::Matrix<double, 6, 6>::Zero();
-        Vector6d b = Vector6d::Zero();
-        double cost = 0;
+        
         // Run transformation search on current level iteratively.
-        calculatePnPInliers(srcFrame->pyramidImage[level], dstFrame->pyramidImage[level], srcFrame->pyramidDepth[level], dstFrame->pyramidDepth[level],weight, pose_gn, pts_3d_eigen, pts_2d_eigen, resultRt, levelCameraMatrix, 0);
+        
         for(int iter = 0; iter < iterCounts[level]; iter ++) // iter = 10 7 7 7
         {
-
-            
             Eigen::Matrix<double, 6, 6> H = Eigen::Matrix<double, 6, 6>::Zero();
             Vector6d b = Vector6d::Zero();
-            cost = 0;
+            double cost = 0;
+            vector<double> weight;
+            VecVector3d pts_3d_eigen;
+            VecVector2d pts_2d_eigen;
             Mat resultRt_inv = resultRt.inv(DECOMP_SVD);
-            cout << resultRt_inv << endl;
-            cout << "iter " << iter << endl;
-            // cout << "iterRt " << resultRt << resultRtPnP << endl;
-            // cout << "currRt " << currRt << currRtPnP;
-            if(method & RGBD_ODOMETRY)
-
+            if(method & RGBD_ODOMETRY){
                 computeCorresps(levelCameraMatrix, levelCameraMatrix_inv, resultRt_inv,
                                 srcLevelDepth, srcFrame->pyramidMask[level], dstLevelDepth, dstFrame->pyramidTexturedMask[level],
                                 maxDepthDiff, corresps_rgbd);
+            }
 
-            if(method & ICP_ODOMETRY)
+            if(method & ICP_ODOMETRY){
                 computeCorresps(levelCameraMatrix, levelCameraMatrix_inv, resultRt_inv,
                                 srcLevelDepth, srcFrame->pyramidMask[level], dstLevelDepth, dstFrame->pyramidNormalsMask[level],
                                 maxDepthDiff, corresps_icp);
+            }
             // cout << corresps_rgbd << " " << corresps_icp << endl; // size: oo*4
             // if(corresps_rgbd.rows < minCorrespsCount && corresps_icp.rows < minCorrespsCount && iter > 0 && cost >= lastCost){
             //     cout << "too few" << endl;
             //     break;
             // }
-            
-            
+            if(level == 0){
+                calculatePnPInliers(srcFrame->pyramidImage[level], dstFrame->pyramidImage[level], srcFrame->pyramidDepth[level], dstFrame->pyramidDepth[level], weight, pose, pts_3d_eigen, pts_2d_eigen, resultRt, levelCameraMatrix, 0);
+            }
             // check residual error convergence
-            // cout << srcFrame->pyramidImage[level].size() << " " << srcFrame->pyramidDepth[level].size() << endl;
-            cout << levelCameraMatrix << endl;
-            
-
             Mat AtA(transformDim, transformDim, CV_64FC1, Scalar(0)), AtB(transformDim, 1, CV_64FC1, Scalar(0));
             if(corresps_rgbd.rows >= minCorrespsCount) // 120
             {
@@ -1516,139 +1348,73 @@ bool RGBDICPOdometryImpl(Mat& Rt, const Mat& initRt,
                 AtA += AtA_icp;
                 AtB += AtB_icp;
             }
+            if(corresps_icp.rows >= minCorrespsCount)
+                calcPnPLsmMatrices(levelCameraMatrix, resultRt, pose, pts_3d_eigen, pts_2d_eigen, H, b, cost, lastCost, weight, AtA_pnp, AtB_pnp);
             
-            Mat K = levelCameraMatrix;
-            double fx = K.at<double>(0, 0);
-            double fy = K.at<double>(1, 1);
-            double cx = K.at<double>(0, 2);
-            double cy = K.at<double>(1, 2);
-            Eigen::Matrix<double, 4, 4> Rt;
-            // cv2eigen(resultRt, Rt);
-            // cv2eigen(resultRtPnP, Rt);
-            // cout << "Rt " << Rt << endl;
-            if(pts_3d_eigen.size() > 0){
-            for (int i = 0; i < pts_3d_eigen.size(); i++) {
-                // cout << "pnp " << Rt << endl;
-                // cout << (Rt * (pts_3d_eigen[i].homogeneous())).transpose().hnormalized().rows() << " " << (Rt * (pts_3d_eigen[i].homogeneous())).transpose().hnormalized().cols() << endl;
-                // cout << (Rt * (pts_3d_eigen[i].homogeneous())).transpose().hnormalized() << endl;
-                // for(int l=0; l<4; l++){
-                //     cout << (pts_3d_eigen[i].homogeneous()).transpose()[l] << " ";
-                // }
-                // cout << endl;
-                // Eigen::Vector3d pc = (Rt * (pts_3d_eigen[i].homogeneous())).transpose().hnormalized();
-                Eigen::Vector3d pc = pose * pts_3d_eigen[i];
-                double inv_z = 1.0 / pc[2];
-                double inv_z2 = inv_z * inv_z;
-                Eigen::Vector2d proj(fx * pc[0] / pc[2] + cx, fy * pc[1] / pc[2] + cy);
-                Eigen::Vector2d e = proj - pts_2d_eigen[i];
-                // "[" << pts_3d_eigen[i][0] << ", " << pts_3d_eigen[i][1] << "]" <<"[" << pc[0] << ", " << pc[1] << "]" <<
-                cout <<  "[" << pts_2d_eigen[i][0] << ", " << pts_2d_eigen[i][1] << "]" << " [" << proj[0] << ", " << proj[1] << "]" << endl;
-                // cout << fx << " " << inv_z << " " << inv_z2 << " " << fx << " " << fy << endl;
-                cost += e.squaredNorm();
-                Eigen::Matrix<double, 2, 6> J;
-                J << -fx * inv_z,
-                    0,
-                    fx * pc[0] * inv_z2,
-                    fx * pc[0] * pc[1] * inv_z2,
-                    -fx - fx * pc[0] * pc[0] * inv_z2,
-                    fx * pc[1] * inv_z,
-                    0,
-                    -fy * inv_z,
-                    fy * pc[1] * inv_z2,
-                    fy + fy * pc[1] * pc[1] * inv_z2,
-                    -fy * pc[0] * pc[1] * inv_z2,
-                    -fy * pc[0] * inv_z;
-                // cout << "J " << J << endl;
-                // cout << endl;
-                H += J.transpose() * (J * weight[i]);
-                b += -J.transpose() * (e * weight[i]);
-                // cout << J << endl;
-                // cout << weight[i] << " " << e << endl;
-            }
-            cout << "cost " << cost << " " << lastCost << endl;
-            cv::Mat AtA_pnp(cv::Size(6, 6), AtA_rgbd.type());
-            cv::Mat AtB_pnp(cv::Size(1, 6), AtB_rgbd.type());
-            // cout << AtA_pnp << " " << AtA_pnp.type() << endl;
-            // cout << "ergeger    "  << H << endl;
-            // cout << "ergeger    "  << b << endl;
-
             cv::eigen2cv(H, AtA_pnp);
             cv::eigen2cv(b, AtB_pnp);
-            
-            // cout << AtA_pnp << endl;
-            // cout << AtB_pnp << endl;
-            
-            // // run only pnp method
             AtA += AtA_pnp;
             AtB += AtB_pnp;
-        }
-            // cout << "HHHHHHHHHH     " << AtA << endl;
-            // cout << "bbbbbbbbbb     " << AtB << endl;
 
+            bool solutionExist = solveSystem(AtA, AtB, determinantThreshold, ksi);
+            // cout << "ksi " << ksi << endl;
+            if(!solutionExist){ 
+                break;
+            }
             Eigen::Matrix<double, 6, 6> eigenH;
             Eigen::Matrix<double, 6, 1> eigenb;
             cv::cv2eigen(AtA, eigenH);
             cv::cv2eigen(AtB, eigenb);
-            // cout << "eigen " << eigenH << endl;
-            // cout << "eigen " << eigenb << endl;
-
-            Vector6d dx;
-            dx = eigenH.ldlt().solve(eigenb);
-            if (dx.norm() < 1e-8) {
-                // converge
-                cout << "converge" << endl;
-                break;
-            }
-            cout << "old pose " << pose.matrix() << endl;
-            pose = Sophus::SE3d::exp(dx) * pose;
-            cout << Sophus::SE3d::exp(dx).matrix() << endl;
-            cout << "new pose " << pose.matrix() << endl;
-
-            bool solutionExist = solveSystem(AtA, AtB, determinantThreshold, ksi);
-            if(!solutionExist){
-                cout << "noSolution " << endl;
-                break;
-            }
-            
+            Vector6d dx = eigenH.ldlt().solve(eigenb);
+            Vector6d new_dx;
+            new_dx << dx[3], dx[4], dx[5], dx[0], dx[1], dx[2];
+            // cout << "dx " << new_dx << endl;
+            // cout << "old pose " << pose.matrix() << endl;
+            pose = Sophus::SE3d::exp(new_dx) * pose;
+            // cout << "new pose " << pose.matrix() << endl;
             
             if(transfromType == Odometry::ROTATION)
             {
                 Mat tmp(6, 1, CV_64FC1, Scalar(0));
                 ksi.copyTo(tmp.rowRange(0,3));
-                cout << "ksi1" << ksi << tmp << endl;
                 ksi = tmp;
-                cout << "ksi2" << ksi << endl;
             }
             else if(transfromType == Odometry::TRANSLATION)
             {
                 Mat tmp(6, 1, CV_64FC1, Scalar(0));
                 ksi.copyTo(tmp.rowRange(3,6));
-                cout << "ksi3" << ksi << tmp << endl;
                 ksi = tmp;
-                cout << "ksi4" << ksi << endl;
             }
-            cout << "ksi " << ksi << endl;
-            if(iter > 0 && cost >= lastCost){
-                cout << "cost: " << cost << ", last cost: " << lastCost << endl;
-                break;
-            }
-            lastCost = cost;
-            // computeProjectiveMatrixInv(ksi, currRtPnP);    
+            
+            // cout << "ksi " << ksi << endl;
+            // if(iter > 0 && cost >= lastCost){
+            //     cout << "cost: " << cost << ", last cost: " << lastCost << endl;
+            //     break;
+            // }
+            // lastCost = cost;
             // cout << "reverseRt " << currRtPnP << resultRtPnP << endl;
             // resultRtPnP = currRtPnP * resultRtPnP;
 
             computeProjectiveMatrix(ksi, currRt); // ksi size = 6*1
+            // computeProjectiveMatrixInv(ksi, currRt);    
             // cout << "current" << currRt << resultRt << endl;
             resultRt = currRt * resultRt;
+            // cout << "Rt " << resultRt << endl;
             isOk = true;
-            
+            // cout << "iteration " << iter << " cost=" << std::setprecision(12) << cost << endl;
+            lastCost = cost;
+            if (dx.norm() < 1e-8) { // converge
+                cout << "converge" << endl;
+                break;
+            }
+        
         }
-        // cout << "result " << resultRt << endl;
+        cout << "Finish calculating!!!!!" << endl;
     }
 
     Rt = resultRt;
-    cout << Rt << Rt.size();
-    cout << pose.matrix();
+    // cout << "Rt " << Rt << endl;
+    cout << pose.matrix() << endl;
     Rt.at<double>(0,0) = pose.matrix()(0);
     Rt.at<double>(1,0) = pose.matrix()(1);
     Rt.at<double>(2,0) = pose.matrix()(2);
@@ -1665,7 +1431,7 @@ bool RGBDICPOdometryImpl(Mat& Rt, const Mat& initRt,
     Rt.at<double>(1,3) = pose.matrix()(13);
     Rt.at<double>(2,3) = pose.matrix()(14);
     Rt.at<double>(3,3) = pose.matrix()(15);
-    cout << Rt << endl;
+    // cout << "Rt by gn " << Rt << endl;
     if(isOk)
     {
         Mat deltaRt;
@@ -1674,10 +1440,10 @@ bool RGBDICPOdometryImpl(Mat& Rt, const Mat& initRt,
             deltaRt = resultRt;
         else
             deltaRt = resultRt * initRt.inv(DECOMP_SVD);
-        cout << "initRt " << initRt << " " << deltaRt << endl;
+        // cout << "initRt " << initRt << " " << deltaRt << endl;
         isOk = testDeltaTransformation(deltaRt, maxTranslation, maxRotation);
     }
-    cout << "isOk" << isOk << endl;
+    // cout << "isOk" << isOk << endl;
     return isOk;
 }
 
@@ -1788,27 +1554,23 @@ bool Odometry::compute(const Mat& srcImage, const Mat& srcDepth, const Mat& srcM
 {
     Ptr<OdometryFrame> srcFrame(new OdometryFrame(srcImage, srcDepth, srcMask));
     Ptr<OdometryFrame> dstFrame(new OdometryFrame(dstImage, dstDepth, dstMask));
-
+    cout << "there" << endl;
     return compute(srcFrame, dstFrame, Rt, initRt);
 }
 
 bool Odometry::compute(Ptr<OdometryFrame>& srcFrame, Ptr<OdometryFrame>& dstFrame, Mat& Rt, const Mat& initRt) const
 {
     checkParams();
-
     Size srcSize = prepareFrameCache(srcFrame, OdometryFrame::CACHE_SRC);
     Size dstSize = prepareFrameCache(dstFrame, OdometryFrame::CACHE_DST);
-    cout << srcSize << dstSize << endl;
     if(srcSize != dstSize)
         CV_Error(Error::StsBadSize, "srcFrame and dstFrame have to have the same size (resolution).");
-    // cout << "compute here" << endl;
-    // cout << "compute " << srcFrame->depth.type() << " " << dstFrame->depth.type() << endl;
     return computeImpl(srcFrame, dstFrame, Rt, initRt);
 }
 
 Size Odometry::prepareFrameCache(Ptr<OdometryFrame> &frame, int /*cacheType*/) const
 {
-    cout << "1" << endl;
+    // cout << "1 " << Size() << endl;
     if(frame == 0)
         CV_Error(Error::StsBadArg, "Null frame pointer.\n");
 
@@ -1847,7 +1609,7 @@ RgbdOdometry::RgbdOdometry(const Mat& _cameraMatrix,
                            const std::vector<float>& _minGradientMagnitudes,
                            float _maxPointsPart,
                            int _transformType) :
-                           minDepth(_minDepth), maxDepth(_maxDepth), maxDepthDiff(_maxDepthDiff),
+                           minDepth(_minDepth), maxDepth(_maxDepth), maxDepthDiff(_maxDepthDiff), // mindepth fix
                            iterCounts(Mat(_iterCounts).clone()),
                            minGradientMagnitudes(Mat(_minGradientMagnitudes).clone()),
                            maxPointsPart(_maxPointsPart),
@@ -1864,7 +1626,10 @@ RgbdOdometry::RgbdOdometry(const Mat& _cameraMatrix,
 Size RgbdOdometry::prepareFrameCache(Ptr<OdometryFrame>& frame, int cacheType) const
 {
     Odometry::prepareFrameCache(frame, cacheType);
-    cout << "2" << endl;
+    // cout << "2" << endl;  // Rgbd is here
+    cout << frame->image.empty() << " " << frame->depth.empty() << " " << frame->mask.empty() << endl;
+    cout << frame->pyramidCloud.empty() << " " << frame->pyramidDepth.empty() << " " << frame->pyramidMask.empty() << endl;
+    cout << frame->pyramidImage.empty() << " " << frame->pyramidNormals.empty() << " " << frame->pyramid_dI_dx.empty() << " " << frame->pyramid_dI_dy.empty() << " " << frame->pyramidTexturedMask.empty() << endl;
     if(frame->image.empty())
     {
         if(!frame->pyramidImage.empty())
@@ -1878,8 +1643,6 @@ Size RgbdOdometry::prepareFrameCache(Ptr<OdometryFrame>& frame, int cacheType) c
     {
         if(!frame->pyramidDepth.empty()){
             frame->depth = frame->pyramidDepth[0];
-            // cout << "          if " << frame->image.channels() << endl;
-            // cout << "          if " << frame->depth.channels() << endl;
         }
         else if(!frame->pyramidCloud.empty())
         {
@@ -1887,8 +1650,6 @@ Size RgbdOdometry::prepareFrameCache(Ptr<OdometryFrame>& frame, int cacheType) c
             std::vector<Mat> xyz;
             split(cloud, xyz);
             frame->depth = xyz[2];
-            // cout << "else          if " << frame->image.channels() << endl;
-            // cout << "else          if " << frame->depth.channels() << endl;
         }
         else
             CV_Error(Error::StsBadSize, "Depth or pyramidDepth or pyramidCloud have to be set.");
@@ -1899,19 +1660,28 @@ Size RgbdOdometry::prepareFrameCache(Ptr<OdometryFrame>& frame, int cacheType) c
     if(frame->mask.empty() && !frame->pyramidMask.empty())
         frame->mask = frame->pyramidMask[0];
     checkMask(frame->mask, frame->image.size());
-
-    preparePyramidImage(frame->image, frame->pyramidImage, iterCounts.total());
+    preparePyramidImage(frame->image, frame->pyramidImage, iterCounts.total()); // iterCounts size [1x4], total=4
     // cout << frame->pyramidImage[3].channels() << frame->pyramidImage[3].type() << endl;
     preparePyramidDepth(frame->depth, frame->pyramidDepth, iterCounts.total());
     // cout << frame->pyramidDepth[3].channels() << frame->pyramidDepth[3].type() << endl;
+
     preparePyramidMask(frame->mask, frame->pyramidDepth, (float)minDepth, (float)maxDepth,
                        frame->pyramidNormals, frame->pyramidMask);
-
     if(cacheType & OdometryFrame::CACHE_SRC)
         preparePyramidCloud(frame->pyramidDepth, cameraMatrix, frame->pyramidCloud);
 
     if(cacheType & OdometryFrame::CACHE_DST)
     {
+        // for(int v1 = 0; v1 < frame->depth.rows; v1++)
+        // {
+        //     const float *depth1_row = frame->depth.ptr<float>(v1);
+        //     for(int u1 = 0; u1 < frame->depth.cols; u1++)
+        //     {
+        //         float d1 = depth1_row[u1];
+        //         cout << "origCache " << v1 << "," << u1 << " " << d1*5000 << endl;
+        //     }
+        // }
+        // cout << "maxPoint " << maxPointsPart << endl; // maxPointsPart=0.7
         preparePyramidSobel(frame->pyramidImage, 1, 0, frame->pyramid_dI_dx);
         preparePyramidSobel(frame->pyramidImage, 0, 1, frame->pyramid_dI_dy);
         preparePyramidTexturedMask(frame->pyramid_dI_dx, frame->pyramid_dI_dy, minGradientMagnitudes,
@@ -1926,6 +1696,7 @@ void RgbdOdometry::checkParams() const
     CV_Assert(maxPointsPart > 0. && maxPointsPart <= 1.);
     CV_Assert(cameraMatrix.size() == Size(3,3) && (cameraMatrix.type() == CV_32FC1 || cameraMatrix.type() == CV_64FC1));
     CV_Assert(minGradientMagnitudes.size() == iterCounts.size() || minGradientMagnitudes.size() == iterCounts.t().size());
+    // minGradientMagnitudes.size() [1x4], iterCounts.size() [1x4]
 }
 
 bool RgbdOdometry::computeImpl(const Ptr<OdometryFrame>& srcFrame, const Ptr<OdometryFrame>& dstFrame, Mat& Rt, const Mat& initRt) const
@@ -2119,7 +1890,7 @@ Size RgbdICPOdometry::prepareFrameCache(Ptr<OdometryFrame>& frame, int cacheType
 
     //cout << "liyang test" << frame->mask << endl;
     //exit(1);
-    cout << frame->pyramidMask.size() << " " << frame->mask.size() << " " << frame->mask.empty() << " " << frame->pyramidMask.empty() << endl;
+    // cout << frame->pyramidMask.size() << " " << frame->mask.size() << " " << frame->mask.empty() << " " << frame->pyramidMask.empty() << endl;
     for(int i=0; i<frame->pyramidImage.size(); i++){
         // cout << "index5 " << i << " " << frame->pyramidImage[i].size() << " " << frame->pyramidDepth[i].size() << " " << frame->pyramidCloud[i].size() << " "  << endl;
     }
@@ -2158,7 +1929,7 @@ Size RgbdICPOdometry::prepareFrameCache(Ptr<OdometryFrame>& frame, int cacheType
 
         preparePyramidMask(frame->mask, frame->pyramidDepth, (float)minDepth, (float)maxDepth,
                            frame->pyramidNormals, frame->pyramidMask);
-
+        
         //cout << "liyang test" << frame->mask << endl;
         //exit(1);
         preparePyramidSobel(frame->pyramidImage, 1, 0, frame->pyramid_dI_dx);
@@ -2186,6 +1957,7 @@ void RgbdICPOdometry::checkParams() const
     CV_Assert(maxPointsPart > 0. && maxPointsPart <= 1.);
     CV_Assert(cameraMatrix.size() == Size(3,3) && (cameraMatrix.type() == CV_32FC1 || cameraMatrix.type() == CV_64FC1));
     CV_Assert(minGradientMagnitudes.size() == iterCounts.size() || minGradientMagnitudes.size() == iterCounts.t().size());
+    
 }
 
 bool RgbdICPOdometry::computeImpl(const Ptr<OdometryFrame>& srcFrame, const Ptr<OdometryFrame>& dstFrame, Mat& Rt, const Mat& initRt) const

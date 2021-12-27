@@ -48,6 +48,7 @@ namespace rgbd
   depthTo3d_from_uvz(const cv::Mat& in_K, const cv::Mat& u_mat, const cv::Mat& v_mat, const cv::Mat& z_mat,
                      cv::Mat& points3d)
   {
+    cout << "haha" << in_K.depth() << endl;
     CV_Assert((u_mat.size() == z_mat.size()) && (v_mat.size() == z_mat.size()));
     if (u_mat.empty())
       return;
@@ -89,6 +90,7 @@ namespace rgbd
   static void
   depthTo3dMask(const cv::Mat& depth, const cv::Mat& K, const cv::Mat& mask, cv::Mat& points3d)
   {
+    cout << "haha3" << K.depth() << " " << depth.type() << " " mask.empty() << " " << depth.depth() << endl;
     // Create 3D points in one go.
     cv::Mat_<float> u_mat, v_mat, z_mat;
 
@@ -130,6 +132,7 @@ namespace rgbd
   void
   depthTo3dNoMask(const cv::Mat& in_depth, const cv::Mat_<T>& K, cv::Mat& points3d)
   {
+    cout << "haha2" << K.depth() << " " << in_depth.type() << endl;
     const T inv_fx = T(1) / K(0, 0);
     const T inv_fy = T(1) / K(1, 1);
     const T ox = K(0, 2);
@@ -184,7 +187,8 @@ namespace rgbd
   void
   depthTo3dSparse(InputArray depth_in, InputArray K_in, InputArray points_in, OutputArray points3d_out)
   {
-    // Make sure we use foat types
+    // Make sure we use float types
+    cout << "haha1" << K_in.depth() << " " << depth_in.type() << depth_in.depth() << endl;
     cv::Mat points = points_in.getMat();
     cv::Mat depth = depth_in.getMat();
 
@@ -235,6 +239,7 @@ namespace rgbd
     CV_Assert(mask.empty() || mask.channels() == 1);
 
     // TODO figure out what to do when types are different: convert or reject ?
+    cout << "haha" << K.depth() << " " << depth.type() << " " mask.empty() << " " << depth.depth() << endl;
     cv::Mat K_new;
     if ((depth.depth() == CV_32F || depth.depth() == CV_64F) && depth.depth() != K.depth())
     {
